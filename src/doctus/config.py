@@ -3,6 +3,8 @@
 import os
 from dataclasses import dataclass
 
+from dotenv import find_dotenv, load_dotenv
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -15,6 +17,8 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    # Read .env from the working directory if present; real env vars win.
+    load_dotenv(find_dotenv(usecwd=True), override=False)
     return Settings(
         db_path=os.environ.get("DOCTUS_DB", "doctus.db"),
         llm_provider=os.environ.get("DOCTUS_LLM", "gemini"),
