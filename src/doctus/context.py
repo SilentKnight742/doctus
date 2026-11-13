@@ -27,6 +27,19 @@ def build_topic_context(
 ) -> TopicContext:
     prereqs = store.prerequisites(node.id)
     dependents = store.dependents(node.id)
+    covered_neighbours, frontier = [], []
+    seen: set[int] = set()
+    for other, edge in store.neighbours(node.id):
+        if other.id in seen:
+            continue
+        seen.add(other.id)
+        if other.status == "covered":
+            covered_neighbours.append({
+                "id": other.id, "name": other.name, "summary": other.summary,
+                "kind": edge.kind,
+            })
+        elif other.status == "frontier":
+            frontier.append({"id": other.id, "name": other.name})
 
     prereq_info = [
         {
@@ -52,6 +65,12 @@ def build_topic_context(
         lines.append(f"- {p['name']} (strength {_strength_label(p['strength'])}): {p['summary']}")
     if dependents:
         lines += ["", "Concepts that build on this one: " + ", ".join(d.name for d in dependents)]
+    if covered_neighbours:
+        lines += ["", "Nearby concepts the learner has already covered:"]
+        lines += [f"- {c['name']}: {c['summary']}" for c in covered_neighbours]
+    if frontier:
+        lines += ["", "Suggested next topics (not explored yet): "
+                  + ", ".join(f["name"] for f in frontier)]
 
     return TopicContext(
         text="\n".join(lines),
@@ -59,5 +78,7 @@ def build_topic_context(
             "node": {"id": node.id, "name": node.name, "summary": node.summary},
             "prerequisites": prereq_info,
             "dependents": [{"id": d.id, "name": d.name} for d in dependents],
+            "covered_neighbours": covered_neighbours,
+            "frontier": frontier,
         },
     )

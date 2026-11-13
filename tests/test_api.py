@@ -81,7 +81,8 @@ def test_skeleton_filters_duplicates_self_links_and_unknown_names(env):
 def test_accepting_skeleton_builds_graph(env):
     client, llm, *_ = env
     _, graph = _subject_with_graph(client, llm)
-    assert [n["name"] for n in graph["nodes"]] == ["Vectors", "Dot product", "Attention"]
+    names = [n["name"] for n in graph["nodes"]]
+    assert names == ["Transformers", "Vectors", "Dot product", "Attention"]  # origin first
     assert len(graph["edges"]) == 2
     assert graph["proposal_stats"]["accepted"] == 5
     assert all(n["level"] == 0 for n in graph["nodes"])

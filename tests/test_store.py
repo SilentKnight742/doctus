@@ -46,7 +46,7 @@ def test_accepting_node_proposal_creates_node(store):
     s = store.create_subject("v1", "Transformers")
     _accept_nodes(store, s["id"], "Attention")
     nodes = store.list_nodes(s["id"])
-    assert [n.name for n in nodes] == ["Attention"]
+    assert [n.name for n in nodes] == ["Transformers", "Attention"]  # origin first
     assert store.proposal_stats(s["id"]) == {"pending": 0, "accepted": 1, "rejected": 0}
 
 
@@ -105,7 +105,7 @@ def test_rejected_proposal_cannot_be_accepted(store):
     store.reject_proposal("v1", p.id)
     with pytest.raises(Conflict):
         store.accept_proposal("v1", p.id)
-    assert store.list_nodes(s["id"]) == []
+    assert [n.name for n in store.list_nodes(s["id"])] == ["Transformers"]  # origin only
 
 
 def test_recent_messages_keeps_topic_and_subject_chats_apart(store):

@@ -1,13 +1,38 @@
-"""Turns model output into graph-change proposals the learner reviews.
+"""Graph helpers, plus the older proposal flow (starter map / update-graph).
+
+The proposal flow turns model output into graph-change proposals the
+learner reviews. It is outside the main exploration flow for now.
 
 The model never edits the graph directly. Its suggestions are filtered
 (duplicates, unknown names, self-links, over-limit items dropped) and
 stored as pending proposals.
 """
 
+from collections import deque
+
 from .llm import LLM, Turn
 from .prompts import SKELETON_SYSTEM, UPDATE_SYSTEM, GraphProposal
-from .store import Proposal, Store, name_key
+from .store import Edge, Proposal, Store, name_key
+
+
+def distances_from(origin_id: int | None, edges: list[Edge]) -> dict[int, int]:
+    """Hops from the origin over all edges, ignoring direction and kind.
+    Nodes not reachable from the origin are absent."""
+    if origin_id is None:
+        return {}
+    adjacent: dict[int, set[int]] = {}
+    for e in edges:
+        adjacent.setdefault(e.from_id, set()).add(e.to_id)
+        adjacent.setdefault(e.to_id, set()).add(e.from_id)
+    dist = {origin_id: 0}
+    queue = deque([origin_id])
+    while queue:
+        current = queue.popleft()
+        for nxt in adjacent.get(current, ()):
+            if nxt not in dist:
+                dist[nxt] = dist[current] + 1
+                queue.append(nxt)
+    return dist
 
 
 def _filter(
