@@ -50,7 +50,7 @@ API docs: http://127.0.0.1:8000/docs. Every request needs an
 |---|---|---|
 | `DOCTUS_LLM` | `gemini` | `gemini` or `fake` |
 | `GEMINI_API_KEY` | none | Gemini API key |
-| `DOCTUS_GEMINI_MODEL` | `gemini-3.8-flash` | Any Gemini model your key can use |
+| `DOCTUS_GEMINI_MODEL` | `gemini-3.5-flash-lite` | Any Gemini model your key can use |
 | `DOCTUS_DB` | `doctus.db` | SQLite file |
 | `DOCTUS_MAX_PROPOSALS` | `5` | Max proposals per graph update |
 | `DOCTUS_RECENT_TURNS` | `8` | Chat turns kept in context |

@@ -20,7 +20,7 @@ def load_settings() -> Settings:
         llm_provider=os.environ.get("DOCTUS_LLM", "gemini"),
         gemini_api_key=os.environ.get("GEMINI_API_KEY"),
         # Model names change often; override with DOCTUS_GEMINI_MODEL.
-        gemini_model=os.environ.get("DOCTUS_GEMINI_MODEL", "gemini-3.8-flash"),
+        gemini_model=os.environ.get("DOCTUS_GEMINI_MODEL", "gemini-3.5-flash-lite"),
         max_proposals_per_update=int(os.environ.get("DOCTUS_MAX_PROPOSALS", "5")),
         recent_turns_in_context=int(os.environ.get("DOCTUS_RECENT_TURNS", "8")),
     )
