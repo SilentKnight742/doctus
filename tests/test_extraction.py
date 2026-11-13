@@ -77,13 +77,40 @@ def test_quote_matches_despite_whitespace_and_case():
     assert normalise(" A \n b ") == "a b"
 
 
+def test_quote_matches_despite_markdown_emphasis():
+    s = Store(":memory:")
+    subj, origin = _subject(s)
+    m = s.add_message(subj["id"], origin.id, "assistant",
+                      "It answers ***Wohin?*** so we need the **Accusative** case, e.g. `ins` Kino.")
+    assert find_quote("It answers Wohin? so we need the Accusative case, e.g. ins Kino.", [m]) is m
+    # a changed word still fails
+    assert find_quote("It answers Wo? so we need the Accusative case", [m]) is None
+
+
+def test_covered_concept_without_link_is_invalid():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        Extraction.model_validate({"covered": [{"name": "X", "evidence": ["q"]}]})
+
+
+def test_covered_concept_is_always_linked_to_current_node(store):
+    s, origin = _subject(store)
+    msgs = _chat(store, s, origin, ("q", "Two-way prepositions take accusative or dative."))
+    _apply(store, s, origin, msgs, covered=[
+        {"name": "Two-way prepositions", "evidence": ["take accusative or dative"],
+         "link": _link("related")},
+    ])
+    node = store.find_node_by_name(s["id"], "Two-way prepositions")
+    assert distances_from(origin.id, store.list_edges(s["id"]))[node.id] == 1
+
+
 def test_fabricated_quote_is_dropped_and_counted(store):
     s, origin = _subject(store)
     msgs = _chat(store, s, origin, ("When do I use dative?", TUTOR_LINE))
     summary = _apply(store, s, origin, msgs, covered=[
         {"name": "Dativ for position", "summary": "x",
-         "evidence": ["the dative marks static location in all cases"]},
-        {"name": "No quotes at all", "summary": "x", "evidence": []},
+         "evidence": ["the dative marks static location in all cases"], "link": _link()},
+        {"name": "No quotes at all", "summary": "x", "evidence": [], "link": _link()},
     ])
     assert store.find_node_by_name(s["id"], "Dativ for position") is None
     assert [d["name"] for d in summary.dropped] == ["Dativ for position", "No quotes at all"]
@@ -126,7 +153,7 @@ def test_frontier_promoted_to_covered(store):
     store.insert_node(s["id"], "Akkusativ", "Case for direct objects.", status="frontier")
     msgs = _chat(store, s, origin, ("And Akkusativ?", "Akkusativ answers wohin: Ich lege das Buch auf den Tisch."))
     summary = _apply(store, s, origin, msgs, covered=[
-        {"name": "akkusativ", "evidence": ["Ich lege das Buch auf den Tisch."]},
+        {"name": "akkusativ", "evidence": ["Ich lege das Buch auf den Tisch."], "link": _link()},
     ])
     node = store.find_node_by_name(s["id"], "Akkusativ")
     assert node.status == "covered"

@@ -5,7 +5,8 @@ covered (with verbatim evidence) and frontier concepts it touched on. The
 code below decides what actually changes:
 
   * a covered concept needs at least one quote that really appears in the
-    conversation (compared after normalising whitespace and case);
+    conversation (compared after normalising whitespace, case and markdown
+    emphasis);
   * frontier suggestions are capped per attach point and never revive a
     name that already exists, including dismissed ones;
   * edges skip duplicates, self-links and prerequisite cycles.
@@ -25,8 +26,13 @@ MAX_QUOTES = 2
 TRIGGER_EVERY = 3
 
 
+_MARKDOWN_EMPHASIS = str.maketrans("", "", "*_`")
+
+
 def normalise(text: str) -> str:
-    return " ".join(text.lower().split())
+    """Lowercase, drop markdown emphasis characters, collapse whitespace.
+    Models often strip the tutor's **bold** / *italics* when quoting."""
+    return " ".join(text.lower().translate(_MARKDOWN_EMPHASIS).split())
 
 
 def find_quote(quote: str, messages: list[Message]) -> Message | None:
