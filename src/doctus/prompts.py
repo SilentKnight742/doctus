@@ -57,10 +57,12 @@ evidence only from them if it is needed, and focus on the new messages.
 Return:
 - current_node_evidence: 1-2 quotes showing the current concept itself was
   taught or understood in this conversation; empty if it was not.
-- covered: other concepts this conversation actually taught (explained,
-  worked through, or the learner showed they understood). For each: a short
-  name, a one-sentence summary, 1-2 evidence quotes, and its link to the
-  current concept.
+- covered: other concepts this conversation actually taught. Each distinct
+  rule, contrast, term or pattern the tutor explained (or the learner showed
+  they understood) is its own concept, even if it is part of the current
+  concept. If the tutor explained it in a reply, it is covered, not frontier.
+  For each: a short name, a one-sentence summary, 1-2 evidence quotes, and
+  its link to the current concept.
 - frontier: concepts that were mentioned or are clearly needed but were NOT
   explored. For each: name, summary, attach_to (the existing or covered
   concept it hangs off, usually the current concept), and the link.
@@ -69,7 +71,10 @@ Evidence rules:
 - Every quote is copied character for character from one message of the
   conversation: a sentence or clause of at least a few words. Do not
   paraphrase, translate, fix spelling, join pieces or add ellipses.
-- A concept that was only mentioned is frontier, not covered.
+- Quote the tutor's explanation or a correct learner answer. Never quote a
+  learner's question as evidence: asking about something is not learning it.
+- A concept that was only mentioned (named, offered as a next step) is
+  frontier, not covered.
 
 Concept rules:
 - One node per teachable idea; short names.
