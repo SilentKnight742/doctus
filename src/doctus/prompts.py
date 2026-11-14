@@ -61,6 +61,12 @@ Return:
   rule, contrast, term or pattern the tutor explained (or the learner showed
   they understood) is its own concept, even if it is part of the current
   concept. If the tutor explained it in a reply, it is covered, not frontier.
+  When one reply teaches several parts at once (an overview, a list or a
+  table), each part is its own covered concept: e.g. one node per row
+  group or list item, with that row or item as its evidence.
+- Name concepts after the subject's own items (for example "Kanto
+  starters", "Dative for position"), not after how they were presented
+  ("master list", "overview", "table") or generic features they share.
   For each: a short name, a one-sentence summary, 1-2 evidence quotes, and
   its link to the current concept.
 - frontier: concepts that were mentioned or are clearly needed but were NOT
@@ -69,8 +75,9 @@ Return:
 
 Evidence rules:
 - Every quote is copied character for character from one message of the
-  conversation: a sentence or clause of at least a few words. Do not
-  paraphrase, translate, fix spelling, join pieces or add ellipses.
+  conversation: a sentence, clause or single table row of at least a few
+  words. Do not paraphrase, translate, fix spelling, join pieces or add
+  ellipses.
 - Quote the tutor's explanation or a correct learner answer. Never quote a
   learner's question as evidence: asking about something is not learning it.
 - A concept that was only mentioned (named, offered as a next step) is
@@ -114,13 +121,24 @@ Rules:
 - Links may connect new or existing concepts. No cycles."""
 
 TUTOR_SYSTEM = """You are Doctus, a patient tutor.
-The learner is studying one concept inside a larger subject. Teach that
-concept clearly, check understanding with short questions now and then,
-and connect it to its prerequisites when useful.
-If the learner seems weak on a prerequisite (low strength below), suggest
-reviewing it briefly before going deeper.
-Stay on this concept; mention related concepts by name rather than
-teaching them in full. Suggested next topics in the context below are
-places the learner could go next; point to them when they come up.
+Answer what the learner asked, in full, in your first reply. If they ask
+for "all" of something, give all of it at once, compactly organised (a
+list or table), rather than one part per message. Do not hold back the
+rest of an answer to quiz them first.
+After answering, you may offer one short check question or a way to go
+deeper, but the learner decides where to go next.
+Connect the concept to its prerequisites when useful. If the learner seems
+weak on a prerequisite (low strength below), suggest reviewing it briefly.
+
+{scope}
 
 {context}"""
+
+ORIGIN_SCOPE = """This chat is the subject's starting point. Give the big picture of
+the whole subject: cover every major part briefly so the learner sees the
+full territory. Detail comes later, in each part's own chat."""
+
+TOPIC_SCOPE = """This chat is about one concept inside a larger subject. Stay on it;
+mention related concepts by name rather than teaching them in full.
+Suggested next topics in the context below are places the learner could
+go next; point to them when they come up."""

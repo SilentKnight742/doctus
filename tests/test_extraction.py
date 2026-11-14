@@ -258,6 +258,13 @@ def _new_subject(client):
     return subj, subj["origin_node_id"]
 
 
+def _topic(client, store):
+    """A subject plus one ordinary (non-origin) topic node to chat in."""
+    subj, _ = _new_subject(client)
+    node = store.insert_node(subj["id"], "Dativ", "", status="frontier")
+    return subj, node.id
+
+
 def test_new_subject_has_frontier_origin(env):
     client, *_ = env
     subj, origin_id = _new_subject(client)
@@ -268,33 +275,33 @@ def test_new_subject_has_frontier_origin(env):
 
 def test_extraction_triggers_on_third_message_not_before(env):
     client, llm, store = env
-    subj, origin_id = _new_subject(client)
+    subj, node_id = _topic(client, store)
     for i in range(2):
-        res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": f"m{i}"}, headers=V1).json()
+        res = client.post(f"/api/nodes/{node_id}/chat", json={"message": f"m{i}"}, headers=V1).json()
         assert res["extraction"] is None
     assert not [c for c in llm.calls if c["kind"] == "json"]
 
     llm.queue_json({"current_node_evidence": ["You said: m2"]})
-    res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": "m2"}, headers=V1).json()
-    assert res["extraction"]["promoted"] == ["German"]
+    res = client.post(f"/api/nodes/{node_id}/chat", json={"message": "m2"}, headers=V1).json()
+    assert res["extraction"]["promoted"] == ["Dativ"]
     assert len([c for c in llm.calls if c["kind"] == "json"]) == 1
 
     # the counter restarts after an extraction
-    res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": "m3"}, headers=V1).json()
+    res = client.post(f"/api/nodes/{node_id}/chat", json={"message": "m3"}, headers=V1).json()
     assert res["extraction"] is None
 
 
 def test_last_extracted_message_advances_and_window_has_two_context_messages(env):
     client, llm, store = env
-    subj, origin_id = _new_subject(client)
+    subj, node_id = _topic(client, store)
     for i in range(3):
-        client.post(f"/api/nodes/{origin_id}/chat", json={"message": f"first-{i}"}, headers=V1)
-    node = store.node_by_id(origin_id)
-    last_id = store.node_messages(origin_id)[-1].id
+        client.post(f"/api/nodes/{node_id}/chat", json={"message": f"first-{i}"}, headers=V1)
+    node = store.node_by_id(node_id)
+    last_id = store.node_messages(node_id)[-1].id
     assert node.last_extracted_message_id == last_id
 
     for i in range(3):
-        client.post(f"/api/nodes/{origin_id}/chat", json={"message": f"second-{i}"}, headers=V1)
+        client.post(f"/api/nodes/{node_id}/chat", json={"message": f"second-{i}"}, headers=V1)
     prompt = [c for c in llm.calls if c["kind"] == "json"][-1]["prompt"]
     convo = prompt.split("Conversation:\n", 1)[1].splitlines()
     assert len(convo) == 2 + 6
@@ -302,30 +309,82 @@ def test_last_extracted_message_advances_and_window_has_two_context_messages(env
     assert convo[1].startswith("[context] assistant:")
     assert convo[2] == "user: second-0"
     assert "first-1" not in prompt
-    assert store.node_by_id(origin_id).last_extracted_message_id == store.node_messages(origin_id)[-1].id
+    assert store.node_by_id(node_id).last_extracted_message_id == store.node_messages(node_id)[-1].id
 
 
 def test_manual_extract_and_nothing_new(env):
     client, llm, store = env
-    subj, origin_id = _new_subject(client)
-    assert client.post(f"/api/nodes/{origin_id}/extract", headers=V1).status_code == 409
-    client.post(f"/api/nodes/{origin_id}/chat", json={"message": "hello"}, headers=V1)
-    res = client.post(f"/api/nodes/{origin_id}/extract", headers=V1)
+    subj, node_id = _topic(client, store)
+    assert client.post(f"/api/nodes/{node_id}/extract", headers=V1).status_code == 409
+    client.post(f"/api/nodes/{node_id}/chat", json={"message": "hello"}, headers=V1)
+    res = client.post(f"/api/nodes/{node_id}/extract", headers=V1)
     assert res.status_code == 200
-    assert client.post(f"/api/nodes/{origin_id}/extract", headers=V1).status_code == 409
+    assert client.post(f"/api/nodes/{node_id}/extract", headers=V1).status_code == 409
 
 
 def test_failed_extraction_keeps_chat_reply(env):
     client, llm, store = env
-    subj, origin_id = _new_subject(client)
+    subj, node_id = _topic(client, store)
     for i in range(2):
-        client.post(f"/api/nodes/{origin_id}/chat", json={"message": f"m{i}"}, headers=V1)
+        client.post(f"/api/nodes/{node_id}/chat", json={"message": f"m{i}"}, headers=V1)
     llm.queue_json("garbage")
     llm.queue_json("garbage")
-    res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": "m2"}, headers=V1)
+    res = client.post(f"/api/nodes/{node_id}/chat", json={"message": "m2"}, headers=V1)
     assert res.status_code == 200
     assert "error" in res.json()["extraction"]
-    assert store.node_by_id(origin_id).last_extracted_message_id is None
+    assert store.node_by_id(node_id).last_extracted_message_id is None
+
+
+def test_origin_first_reply_builds_graph_immediately(env):
+    client, llm, store = env
+    subj, origin_id = _new_subject(client)
+    llm.queue_json({"current_node_evidence": ["You said: overview please"]})
+    res = client.post(f"/api/nodes/{origin_id}/chat",
+                      json={"message": "overview please"}, headers=V1).json()
+    assert res["extraction"]["promoted"] == ["German"]
+    # afterwards the origin follows the normal every-3rd-message rule
+    for i in range(2):
+        res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": f"m{i}"}, headers=V1).json()
+        assert res["extraction"] is None
+    res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": "m2"}, headers=V1).json()
+    assert res["extraction"] is not None
+
+
+def test_tutor_gives_big_picture_in_origin_and_stays_focused_in_topics(env):
+    client, llm, store = env
+    subj, node_id = _topic(client, store)
+    client.post(f"/api/nodes/{subj['origin_node_id']}/chat", json={"message": "all of it"}, headers=V1)
+    client.post(f"/api/nodes/{node_id}/chat", json={"message": "this one"}, headers=V1)
+    origin_sys, topic_sys = [c["system"] for c in llm.calls if c["kind"] == "chat"]
+    assert "starting point" in origin_sys and "Stay on it" not in origin_sys
+    assert "Stay on it" in topic_sys and "starting point" not in topic_sys
+    assert "in full, in your first reply" in origin_sys and "in full, in your first reply" in topic_sys
+
+
+def test_from_node_id_equal_to_node_is_ignored(env):
+    client, llm, store = env
+    subj, origin_id = _new_subject(client)
+    client.post(f"/api/nodes/{origin_id}/chat",
+                json={"message": "a", "from_node_id": origin_id}, headers=V1)
+    trail = client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()["trail"]
+    assert [(t["node_id"], t["from_node_id"]) for t in trail] == [(origin_id, None)]
+
+
+def test_nodes_are_flat_and_list_their_edges(env):
+    client, llm, store = env
+    subj, origin_id = _new_subject(client)
+    child = store.insert_node(subj["id"], "Dativ", "", status="frontier")
+    grandchild = store.insert_node(subj["id"], "Dativ endings", "", status="frontier")
+    store.insert_edge(subj["id"], origin_id, child.id, "prerequisite", "r1")
+    store.insert_edge(subj["id"], child.id, grandchild.id, "related", "r2")
+    # a node two steps from the origin is addressed by its own id alone
+    detail = client.get(f"/api/nodes/{grandchild.id}", headers=V1).json()
+    assert detail["node"]["id"] == grandchild.id
+    assert [(e["source"], e["target"], e["kind"]) for e in detail["edges"]] == [
+        (child.id, grandchild.id, "related")
+    ]
+    mid = client.get(f"/api/nodes/{child.id}", headers=V1).json()
+    assert len(mid["edges"]) == 2
 
 
 def test_trail_records_from_node_id(env):
@@ -345,10 +404,10 @@ def test_trail_records_from_node_id(env):
 
 def test_graph_reports_extraction_stats(env):
     client, llm, store = env
-    subj, origin_id = _new_subject(client)
-    client.post(f"/api/nodes/{origin_id}/chat", json={"message": "hello there"}, headers=V1)
+    subj, node_id = _topic(client, store)
+    client.post(f"/api/nodes/{node_id}/chat", json={"message": "hello there"}, headers=V1)
     llm.queue_json({"current_node_evidence": ["hello there", "not in the chat"]})
-    client.post(f"/api/nodes/{origin_id}/extract", headers=V1)
+    client.post(f"/api/nodes/{node_id}/extract", headers=V1)
     stats = client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()["extraction_stats"]
     assert stats == {"runs": 1, "covered_nodes": 1, "evidence_verified": 1, "evidence_dropped": 1}
 
