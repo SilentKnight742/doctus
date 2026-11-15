@@ -1,6 +1,7 @@
 # Starter-map pilot (2026-11-13)
 
-**Small pilot, not a benchmark.** 3 skeleton calls, judged by one person.
+**Small pilot, not a benchmark.** 3 skeleton calls; edge marks were a
+second-opinion estimate by Claude, not a human judgement.
 
 ## Question
 
@@ -44,8 +45,8 @@ preposition list, Wo/dative, Wohin/accusative, static-vs-motion decision).
 
 ## Results
 
-Marks were given by Apoorv in claude.ai; the per-edge marks were not saved in
-this repository.
+The edge marks were Claude's second-opinion estimate in claude.ai, not
+Apoorv's own marks; the per-edge marks were not saved in this repository.
 
 | Run | Concepts | Edges | Link precision |
 |---|---|---|---|

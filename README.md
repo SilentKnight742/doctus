@@ -6,8 +6,8 @@ Doctus is a learning companion. You chat with a tutor as you would with any
 good AI assistant, and a concept graph of what the chat actually covered grows
 alongside it.
 
-> **Status:** backend only, under active redesign. There is no frontend yet;
-> try it through the API docs at `/docs`. See
+> **Status:** backend only. There is no frontend yet; try it through the
+> API docs at `/docs`. See
 > [Implemented vs in progress](#implemented-vs-in-progress).
 
 ## Design
@@ -48,29 +48,27 @@ alongside it.
 
 ## Implemented vs in progress
 
-Implemented (on `main`):
+Implemented:
 
-- SQLite store with anonymous visitor scoping (`X-Doctus-Visitor` header).
+- SQLite store (WAL) with anonymous visitor scoping (`X-Doctus-Visitor`
+  header).
 - LLM layer: Gemini and a deterministic `FakeLLM`; structured output is
   validated with Pydantic and retried once.
-- Origin node per subject; topic chat per node with a `context_used` record.
-- Extraction with verified evidence quotes, a trail with `from_node_id`, and
-  distance from the origin.
-- Edge kinds `prerequisite` and `related`, with cycle checks on
-  `prerequisite`.
-- The origin chat answers the whole question in its first reply and builds
-  the graph from it.
-- 64 offline tests; one opt-in live Gemini test.
-
-In progress (M1, tutor and cartographer):
-
-- Separate tutor and cartographer layers; the cartographer runs after every
-  exchange in the background (today extraction runs inline, after the
-  origin's first reply and then every 3rd learner message).
-- `part_of` edges and traversal helpers (ancestors, descendants, path).
-- Removing frontier (suggestion) nodes. The current code still creates
-  frontier nodes and has a `/dismiss` endpoint; both go away in M1.
-- A rewritten tutor prompt.
+- **Tutor** and **cartographer** as separate layers with separate prompts.
+  The cartographer can use its own model (`DOCTUS_GRAPH_MODEL`).
+- The cartographer runs after every exchange, in the background, so the
+  reply is never delayed. Runs are serialised per subject; messages that
+  arrive during a run get one more run right after it. A failed run (for
+  example a 429) is not retried: the next exchange catches up. Clients poll
+  `graph_version` and `cartographer: idle | running | error`.
+- Evidence check on every node except the origin; no suggestion or
+  frontier nodes.
+- Edge kinds `prerequisite`, `part_of` and `related`; one `part_of` parent
+  per node; cycle checks per directed kind.
+- Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
+  and the shortest `path` between two nodes.
+- Trail with `from_node_id`; distance from the origin.
+- 71 offline tests; one opt-in live Gemini test.
 
 Planned (M2, UI): React + Vite frontend with a chat screen, a graph screen
 with semantic zoom, and a live mini graph.
@@ -98,6 +96,7 @@ characters).
 | `GEMINI_API_KEY` | empty | Gemini API key |
 | `DOCTUS_LLM` | `gemini` | `gemini` or `fake` |
 | `DOCTUS_GEMINI_MODEL` | `gemini-3.5-flash-lite` | Any Gemini model your key can use |
+| `DOCTUS_GRAPH_MODEL` | empty (= chat model) | Model for the cartographer |
 | `DOCTUS_DB` | `doctus.db` | SQLite file (relative to `backend/`) |
 | `DOCTUS_MAX_PROPOSALS` | `5` | Max proposals per update (starter-map flow) |
 | `DOCTUS_RECENT_TURNS` | `8` | Chat turns sent to the tutor |
@@ -118,16 +117,18 @@ The opt-in live test makes one real chat call and one structured call:
 cd backend && uv run python -m pytest -m live
 ```
 
-## API (current)
+## API
 
 ```
 GET  /api/subjects                       list your subjects
 POST /api/subjects                       {title, goal} -> subject + origin node
-GET  /api/subjects/{id}/graph            nodes, edges (with kind), trail, extraction stats
+GET  /api/subjects/{id}/graph            nodes, edges (with kind), trail, graph_version,
+                                         cartographer state, run stats
+GET  /api/subjects/{id}/graph/status     {graph_version, cartographer, error} (poll this)
 GET  /api/nodes/{id}                     node, evidence, edges, context, chat history
-POST /api/nodes/{id}/chat                {message, from_node_id?} -> reply, context_used, extraction
-POST /api/nodes/{id}/extract             run extraction on new messages now
-POST /api/nodes/{id}/dismiss             dismiss a frontier node (removed in M1)
+POST /api/nodes/{id}/chat                {message, from_node_id?} -> reply, context_used,
+                                         graph_version, cartographer
+POST /api/nodes/{id}/extract             run the cartographer now (409 while one is running)
 
 # Older starter-map flow, outside the main flow:
 POST /api/subjects/{id}/skeleton         propose a starter map
@@ -136,19 +137,25 @@ POST /api/proposals/{id}/accept|reject
 POST /api/nodes/{id}/update-graph        propose changes from the recent chat
 ```
 
+A chat reply comes back before the cartographer has run. To see the new
+graph, poll `/graph/status` until `cartographer` is `idle` (or `error`),
+then fetch `/graph`.
+
 ## Layout
 
 ```
 backend/
   src/doctus/
-    api.py         HTTP endpoints
-    store.py       SQLite storage, visitor scoping, cycle checks, trail, evidence
-    extraction.py  model output -> evidence-checked graph changes
-    graph.py       distance from origin; older proposal flow
-    context.py     topic-chat context and the "context used" record
-    mastery.py     swappable mastery model (placeholder rule)
-    prompts.py     prompts and structured-output schemas
-    llm/           provider interface, Gemini, fake model for tests
+    api.py           HTTP endpoints
+    tutor.py         the tutor layer: prompt and chat call
+    cartographer.py  the cartographer layer: evidence-checked graph changes,
+                     background runs
+    store.py         SQLite storage, visitor scoping, edge rules, traversal
+    graph.py         distance from origin; older proposal flow
+    context.py       the tutor's private notes and the "context used" record
+    mastery.py       swappable mastery model (placeholder rule)
+    prompts.py       prompts and structured-output schemas
+    llm/             provider interface, Gemini, fake model for tests
   tests/
 docs/eval/         small pilot results (not benchmarks)
 ```
@@ -164,11 +171,14 @@ docs/eval/         small pilot results (not benchmarks)
   rather than learning dependencies.
 - Tests and mastery updates are not wired to endpoints yet.
 - Single process, SQLite, no accounts (anonymous visitor tokens).
-- Free-tier Gemini rate limits are low; a burst of messages can return 429.
+- Free-tier Gemini rate limits are low. Each exchange is two calls (tutor
+  and cartographer), so a burst of messages can return 429.
+- Cartographer runs are coordinated in process memory; running several
+  server processes against one database is not supported.
 
 ## Pilot results
 
-Small pilots, run by hand with one learner judging, are in
+Small hand-run pilots are in
 [docs/eval/](docs/eval/). They are not benchmarks.
 
 ## License
