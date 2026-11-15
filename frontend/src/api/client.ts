@@ -68,6 +68,10 @@ export function makeClient(fetchImpl: Fetch = (...a) => fetch(...a), token = vis
     graph: (subjectId: number) => request<Graph>('GET', `/subjects/${subjectId}/graph`),
     status: (subjectId: number) => request<GraphStatus>('GET', `/subjects/${subjectId}/graph/status`),
     node: (nodeId: number) => request<NodeDetail>('GET', `/nodes/${nodeId}`),
+    visit: (nodeId: number, fromNodeId: number | null) =>
+      request<{ recorded: boolean }>('POST', `/nodes/${nodeId}/visit`, {
+        ...(fromNodeId ? { from_node_id: fromNodeId } : {}),
+      }),
     chat: (nodeId: number, message: string, fromNodeId: number | null) =>
       request<ChatReply>('POST', `/nodes/${nodeId}/chat`, {
         message,

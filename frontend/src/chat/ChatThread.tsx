@@ -1,5 +1,6 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { describeError, RateLimited } from '../api/client'
+import { api, describeError, RateLimited } from '../api/client'
 import { useNode, useSendMessage } from '../hooks/chat'
 import { useSubject } from '../state/context'
 import { Composer } from './Composer'
@@ -7,7 +8,8 @@ import { MessageView } from './MessageView'
 
 /** Messages plus composer for one node. Used by the chat screen and the window. */
 export function ChatThread({ nodeId, compact = false }: { nodeId: number; compact?: boolean }) {
-  const { graph, draft, setDraft, contextFor } = useSubject()
+  const { graph, draft, setDraft, contextFor, arrivedFrom, subjectId } = useSubject()
+  const qc = useQueryClient()
   const nodeQ = useNode(nodeId)
   const send = useSendMessage(nodeId)
   const [text, setTextState] = useState(() => draft(nodeId))
@@ -21,6 +23,23 @@ export function ChatThread({ nodeId, compact = false }: { nodeId: number; compac
   const messages = nodeQ.data?.messages ?? []
   const isOrigin = graph?.subject.origin_node_id === nodeId
   const nodeName = nodeQ.data?.node.name ?? ''
+
+  // Opening a node's chat is a step on the trail (the server de-dupes).
+  const cameFrom = arrivedFrom(nodeId)
+  useEffect(() => {
+    let live = true
+    api
+      .visit(nodeId, cameFrom)
+      .then((r) => {
+        if (live && r.recorded) qc.invalidateQueries({ queryKey: ['graph', subjectId] })
+      })
+      .catch(() => {
+        // The trail is best effort; chat still works.
+      })
+    return () => {
+      live = false
+    }
+  }, [nodeId, cameFrom, qc, subjectId])
 
   useEffect(() => {
     const el = scroller.current
