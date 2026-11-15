@@ -9,6 +9,7 @@ import json
 import sqlite3
 import threading
 import time
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,7 +21,12 @@ CREATE TABLE IF NOT EXISTS subjects (
     title       TEXT NOT NULL,
     goal        TEXT NOT NULL DEFAULT '',
     created_at  REAL NOT NULL,
-    origin_node_id INTEGER
+    origin_node_id INTEGER,
+    -- bumped on every graph change, so clients can poll cheaply
+    graph_version INTEGER NOT NULL DEFAULT 0,
+    cartographer_state TEXT NOT NULL DEFAULT 'idle'
+                CHECK (cartographer_state IN ('idle', 'running', 'error')),
+    cartographer_error TEXT
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
@@ -32,14 +38,12 @@ CREATE TABLE IF NOT EXISTS nodes (
     created_at      REAL NOT NULL,
     last_visited_at REAL,
     mastery         TEXT NOT NULL DEFAULT '{}',
-    status          TEXT NOT NULL DEFAULT 'frontier'
-                    CHECK (status IN ('covered', 'frontier', 'dismissed')),
-    covered_at      REAL,
     last_extracted_message_id INTEGER,
     UNIQUE (subject_id, name_key)
 );
 
 -- kind 'prerequisite': from_id must be understood before to_id.
+-- kind 'part_of': from_id is a part of to_id (at most one parent per node).
 -- kind 'related': adjacent concepts; direction carries no meaning.
 CREATE TABLE IF NOT EXISTS edges (
     id          INTEGER PRIMARY KEY,
@@ -47,12 +51,15 @@ CREATE TABLE IF NOT EXISTS edges (
     from_id     INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
     to_id       INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
     kind        TEXT NOT NULL DEFAULT 'prerequisite'
-                CHECK (kind IN ('prerequisite', 'related')),
+                CHECK (kind IN ('prerequisite', 'part_of', 'related')),
     reason      TEXT NOT NULL DEFAULT '',
     UNIQUE (from_id, to_id, kind)
 );
+CREATE INDEX IF NOT EXISTS edges_from ON edges (from_id);
+CREATE INDEX IF NOT EXISTS edges_to ON edges (to_id);
+CREATE INDEX IF NOT EXISTS edges_kind ON edges (kind);
 
--- A verbatim quote from a chat message showing a concept was covered.
+-- A verbatim quote from a chat message showing a concept was taught.
 CREATE TABLE IF NOT EXISTS node_evidence (
     id          INTEGER PRIMARY KEY,
     node_id     INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
@@ -69,7 +76,7 @@ CREATE TABLE IF NOT EXISTS trail (
     at           REAL NOT NULL
 );
 
--- One row per extraction run, for stats and auditing.
+-- One row per cartographer run, for stats and auditing.
 CREATE TABLE IF NOT EXISTS extractions (
     id                INTEGER PRIMARY KEY,
     subject_id        INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
@@ -124,8 +131,6 @@ class Node:
     created_at: float
     last_visited_at: float | None
     mastery: dict[str, Any] = field(default_factory=dict)
-    status: str = "frontier"
-    covered_at: float | None = None
     last_extracted_message_id: int | None = None
 
 
@@ -173,15 +178,22 @@ class Message:
     created_at: float
 
 
+EDGE_KINDS = ("prerequisite", "part_of", "related")
+DIRECTED_KINDS = ("prerequisite", "part_of")  # cycle-checked
+
+
 class Store:
     def __init__(self, path: str, clock=time.time):
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
+        # WAL lets readers proceed while a write is in progress.
+        self._db.execute("PRAGMA journal_mode = WAL")
         self._db.executescript(SCHEMA)
         self._lock = threading.RLock()
         self._depth = 0
         self._clock = clock
+        self.reset_running_cartographers()
 
     def close(self):
         self._db.close()
@@ -210,11 +222,15 @@ class Store:
 
     # ---------- helpers ----------
 
+    # One connection is shared across threads (requests and background
+    # cartographer runs), so every statement goes through the lock.
     def _one(self, sql, args=()):
-        return self._db.execute(sql, args).fetchone()
+        with self._lock:
+            return self._db.execute(sql, args).fetchone()
 
     def _all(self, sql, args=()):
-        return self._db.execute(sql, args).fetchall()
+        with self._lock:
+            return self._db.execute(sql, args).fetchall()
 
     @staticmethod
     def _node(row) -> Node:
@@ -226,8 +242,6 @@ class Store:
             created_at=row["created_at"],
             last_visited_at=row["last_visited_at"],
             mastery=json.loads(row["mastery"]),
-            status=row["status"],
-            covered_at=row["covered_at"],
             last_extracted_message_id=row["last_extracted_message_id"],
         )
 
@@ -238,8 +252,7 @@ class Store:
     # ---------- subjects ----------
 
     def create_subject(self, visitor: str, title: str, goal: str = "") -> dict:
-        """Create a subject and its origin node (named after the title,
-        `frontier` until the learner covers it)."""
+        """Create a subject and its origin node (named after the title)."""
         title = title.strip()
         if not title:
             raise ValueError("Subject title cannot be empty.")
@@ -264,6 +277,49 @@ class Store:
         row = self._one(
             "SELECT * FROM subjects WHERE id = ? AND visitor = ?", (subject_id, visitor)
         )
+        if row is None:
+            raise NotFound(f"Subject {subject_id} not found.")
+        return dict(row)
+
+    # ---------- graph version and cartographer state ----------
+
+    def reset_running_cartographers(self):
+        """After a restart no run can still be in progress."""
+        with self.atomic():
+            self._db.execute(
+                "UPDATE subjects SET cartographer_state = 'idle' "
+                "WHERE cartographer_state = 'running'"
+            )
+
+    def bump_graph_version(self, subject_id: int):
+        with self.atomic():
+            self._db.execute(
+                "UPDATE subjects SET graph_version = graph_version + 1 WHERE id = ?",
+                (subject_id,),
+            )
+
+    def set_cartographer_state(self, subject_id: int, state: str, error: str | None = None):
+        with self.atomic():
+            self._db.execute(
+                "UPDATE subjects SET cartographer_state = ?, cartographer_error = ? WHERE id = ?",
+                (state, error, subject_id),
+            )
+
+    def graph_status(self, subject_id: int) -> dict:
+        row = self._one(
+            """SELECT graph_version, cartographer_state, cartographer_error
+               FROM subjects WHERE id = ?""",
+            (subject_id,),
+        )
+        return {
+            "graph_version": row["graph_version"],
+            "cartographer": row["cartographer_state"],
+            "error": row["cartographer_error"],
+        }
+
+    def subject_by_id(self, subject_id: int) -> dict:
+        """Internal lookup without visitor scoping (background runs only)."""
+        row = self._one("SELECT * FROM subjects WHERE id = ?", (subject_id,))
         if row is None:
             raise NotFound(f"Subject {subject_id} not found.")
         return dict(row)
@@ -297,52 +353,19 @@ class Store:
             raise NotFound(f"Node {node_id} not found.")
         return self._node(row)
 
-    def insert_node(
-        self, subject_id: int, name: str, summary: str, status: str = "frontier"
-    ) -> Node:
+    def insert_node(self, subject_id: int, name: str, summary: str) -> Node:
         name = name.strip()
         if not name:
             raise ValueError("Node name cannot be empty.")
         with self.atomic():
             if self.find_node_by_name(subject_id, name):
                 raise Conflict(f"A node named '{name}' already exists.")
-            now = self._clock()
             cur = self._db.execute(
-                """INSERT INTO nodes (subject_id, name, name_key, summary, created_at,
-                                      status, covered_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    subject_id,
-                    name,
-                    name_key(name),
-                    summary.strip(),
-                    now,
-                    status,
-                    now if status == "covered" else None,
-                ),
+                """INSERT INTO nodes (subject_id, name, name_key, summary, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (subject_id, name, name_key(name), summary.strip(), self._clock()),
             )
         return self.node_by_id(cur.lastrowid)
-
-    def mark_covered(self, node_id: int):
-        """Set a node to `covered` (from frontier or dismissed). Idempotent."""
-        with self.atomic():
-            self._db.execute(
-                """UPDATE nodes SET status = 'covered', covered_at = ?
-                   WHERE id = ? AND status != 'covered'""",
-                (self._clock(), node_id),
-            )
-
-    def dismiss_node(self, visitor: str, node_id: int) -> Node:
-        """Dismiss a frontier suggestion. Covered nodes and the origin stay."""
-        node = self.get_node(visitor, node_id)
-        subject = self.get_subject(visitor, node.subject_id)
-        if subject["origin_node_id"] == node.id:
-            raise Conflict("The origin node cannot be dismissed.")
-        if node.status == "covered":
-            raise Conflict("Covered nodes cannot be dismissed.")
-        with self.atomic():
-            self._db.execute("UPDATE nodes SET status = 'dismissed' WHERE id = ?", (node_id,))
-        return self.node_by_id(node_id)
 
     def set_last_extracted(self, node_id: int, message_id: int):
         with self.atomic():
@@ -398,25 +421,26 @@ class Store:
             out.append((self.node_by_id(other), edge))
         return out
 
-    def _would_create_cycle(self, subject_id: int, from_id: int, to_id: int) -> bool:
-        """Adding prerequisite from -> to makes a cycle if `to` already leads to `from`.
-        Only prerequisite edges count; related edges never form cycles."""
-        if from_id == to_id:
-            return True
-        children: dict[int, list[int]] = {}
-        for e in self.list_edges(subject_id):
-            if e.kind == "prerequisite":
-                children.setdefault(e.from_id, []).append(e.to_id)
-        stack, seen = [to_id], set()
-        while stack:
-            current = stack.pop()
-            if current == from_id:
-                return True
-            if current in seen:
-                continue
-            seen.add(current)
-            stack.extend(children.get(current, []))
-        return False
+    def part_of_parent(self, node_id: int) -> Node | None:
+        row = self._one(
+            """SELECT n.* FROM edges e JOIN nodes n ON n.id = e.to_id
+               WHERE e.from_id = ? AND e.kind = 'part_of'""",
+            (node_id,),
+        )
+        return self._node(row) if row else None
+
+    def parts(self, node_id: int) -> list[Node]:
+        rows = self._all(
+            """SELECT n.* FROM edges e JOIN nodes n ON n.id = e.from_id
+               WHERE e.to_id = ? AND e.kind = 'part_of' ORDER BY n.id""",
+            (node_id,),
+        )
+        return [self._node(r) for r in rows]
+
+    def _would_create_cycle(self, kind: str, from_id: int, to_id: int) -> bool:
+        """Adding from -> to of `kind` makes a cycle if `to` already reaches `from`
+        along edges of the same kind. Each directed kind is checked on its own."""
+        return from_id == to_id or from_id in self._forward_ids(to_id, kind)
 
     def edge_exists(self, from_id: int, to_id: int, kind: str) -> bool:
         if kind == "related":  # undirected for duplicate purposes
@@ -435,15 +459,19 @@ class Store:
     def insert_edge(
         self, subject_id: int, from_id: int, to_id: int, kind: str, reason: str
     ) -> Edge:
-        if kind not in ("prerequisite", "related"):
+        """Raises Conflict (with a short reason) for self-links, cycles,
+        duplicates and a second part_of parent."""
+        if kind not in EDGE_KINDS:
             raise ValueError(f"Unknown edge kind: {kind}")
         if from_id == to_id:
-            raise Conflict("A concept cannot link to itself (that would be a cycle).")
+            raise Conflict("self-link")
         with self.atomic():
-            if kind == "prerequisite" and self._would_create_cycle(subject_id, from_id, to_id):
-                raise Conflict("That prerequisite link would create a cycle.")
+            if kind in DIRECTED_KINDS and self._would_create_cycle(kind, from_id, to_id):
+                raise Conflict(f"{kind} cycle")
             if self.edge_exists(from_id, to_id, kind):
-                raise Conflict(f"That {kind} link already exists.")
+                raise Conflict("duplicate")
+            if kind == "part_of" and self.part_of_parent(from_id) is not None:
+                raise Conflict("second part_of parent")
             cur = self._db.execute(
                 """INSERT INTO edges (subject_id, from_id, to_id, kind, reason)
                    VALUES (?, ?, ?, ?, ?)""",
@@ -451,7 +479,92 @@ class Store:
             )
         return Edge(cur.lastrowid, from_id, to_id, kind, reason.strip())
 
-    # ---------- evidence, trail, extraction log ----------
+    # ---------- traversal ----------
+    # The graph is an adjacency list (nodes + edges). Directed walks use
+    # recursive CTEs; the undirected shortest path uses BFS in Python.
+
+    def _forward_ids(self, node_id: int, kind: str) -> set[int]:
+        """Nodes reached from node_id by following `kind` edges along the arrow."""
+        rows = self._all(
+            """WITH RECURSIVE walk(id) AS (
+                   SELECT to_id FROM edges WHERE from_id = ? AND kind = ?
+                   UNION
+                   SELECT e.to_id FROM edges e JOIN walk w ON e.from_id = w.id
+                   WHERE e.kind = ?
+               ) SELECT id FROM walk""",
+            (node_id, kind, kind),
+        )
+        return {r["id"] for r in rows}
+
+    def _backward_ids(self, node_id: int, kind: str) -> set[int]:
+        """Nodes that reach node_id by following `kind` edges along the arrow."""
+        rows = self._all(
+            """WITH RECURSIVE walk(id) AS (
+                   SELECT from_id FROM edges WHERE to_id = ? AND kind = ?
+                   UNION
+                   SELECT e.from_id FROM edges e JOIN walk w ON e.to_id = w.id
+                   WHERE e.kind = ?
+               ) SELECT id FROM walk""",
+            (node_id, kind, kind),
+        )
+        return {r["id"] for r in rows}
+
+    def _nodes(self, ids: set[int]) -> list[Node]:
+        return [self.node_by_id(i) for i in sorted(ids)]
+
+    def ancestors(self, node_id: int, kind: str) -> list[Node]:
+        """`prerequisite`: everything that must come before this node.
+        `part_of`: every whole this node is (transitively) part of."""
+        if kind == "prerequisite":
+            return self._nodes(self._backward_ids(node_id, kind))
+        if kind == "part_of":
+            return self._nodes(self._forward_ids(node_id, kind))
+        raise ValueError("ancestors() needs a directed kind: prerequisite or part_of")
+
+    def descendants(self, node_id: int, kind: str) -> list[Node]:
+        """`prerequisite`: everything that builds on this node.
+        `part_of`: every (transitive) part of this node."""
+        if kind == "prerequisite":
+            return self._nodes(self._forward_ids(node_id, kind))
+        if kind == "part_of":
+            return self._nodes(self._backward_ids(node_id, kind))
+        raise ValueError("descendants() needs a directed kind: prerequisite or part_of")
+
+    def part_of_root(self, node_id: int) -> Node:
+        """The top-most whole this node belongs to (itself if it has no parent)."""
+        current = self.node_by_id(node_id)
+        seen = {current.id}
+        while (parent := self.part_of_parent(current.id)) is not None and parent.id not in seen:
+            seen.add(parent.id)
+            current = parent
+        return current
+
+    def path(self, a: int, b: int) -> list[int] | None:
+        """Shortest node-id path from a to b over all edges, ignoring direction
+        and kind; None if they are not connected."""
+        subject_id = self.node_by_id(a).subject_id
+        adjacent: dict[int, set[int]] = {}
+        for e in self.list_edges(subject_id):
+            adjacent.setdefault(e.from_id, set()).add(e.to_id)
+            adjacent.setdefault(e.to_id, set()).add(e.from_id)
+        previous: dict[int, int | None] = {a: None}
+        queue = deque([a])
+        while queue:
+            current = queue.popleft()
+            if current == b:
+                out = []
+                step: int | None = b
+                while step is not None:
+                    out.append(step)
+                    step = previous[step]
+                return out[::-1]
+            for nxt in sorted(adjacent.get(current, ())):
+                if nxt not in previous:
+                    previous[nxt] = current
+                    queue.append(nxt)
+        return None
+
+    # ---------- evidence, trail, cartographer log ----------
 
     def add_evidence(self, node_id: int, message_id: int, quote: str) -> Evidence:
         with self.atomic():
@@ -502,13 +615,12 @@ class Store:
                FROM extractions WHERE subject_id = ?""",
             (subject_id,),
         )
-        covered = self._one(
-            "SELECT COUNT(*) AS c FROM nodes WHERE subject_id = ? AND status = 'covered'",
-            (subject_id,),
-        )["c"]
+        nodes = self._one("SELECT COUNT(*) AS c FROM nodes WHERE subject_id = ?", (subject_id,))[
+            "c"
+        ]
         return {
             "runs": row["runs"],
-            "covered_nodes": covered,
+            "nodes": nodes,
             "evidence_verified": row["verified"],
             "evidence_dropped": row["dropped"],
         }

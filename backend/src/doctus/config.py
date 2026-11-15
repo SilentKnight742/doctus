@@ -14,6 +14,8 @@ class Settings:
     gemini_model: str
     max_proposals_per_update: int
     recent_turns_in_context: int
+    # Model for the cartographer; None means the chat model.
+    graph_model: str | None = None
 
 
 def load_settings() -> Settings:
@@ -27,4 +29,5 @@ def load_settings() -> Settings:
         gemini_model=os.environ.get("DOCTUS_GEMINI_MODEL", "gemini-3.5-flash-lite"),
         max_proposals_per_update=int(os.environ.get("DOCTUS_MAX_PROPOSALS", "5")),
         recent_turns_in_context=int(os.environ.get("DOCTUS_RECENT_TURNS", "8")),
+        graph_model=os.environ.get("DOCTUS_GRAPH_MODEL") or None,
     )

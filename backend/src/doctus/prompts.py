@@ -21,82 +21,81 @@ class GraphProposal(BaseModel):
     links: list[ProposedLink] = []
 
 
-class ExtractedLink(BaseModel):
-    kind: Literal["prerequisite", "related"]
-    # Only for prerequisite links: "before" = this concept must be understood
-    # before the node it attaches to; "after" = it builds on that node.
-    direction: Literal["before", "after"] = "before"
+# ---------- cartographer ----------
+
+Relation = Literal["prerequisite_of", "builds_on", "part_of", "contains", "related"]
+
+
+class ConceptLink(BaseModel):
+    # The node this concept hangs off: the current topic, an existing
+    # concept, or another concept from the same answer.
+    attach_to: str = Field(min_length=1, max_length=80)
+    # How the concept relates to attach_to:
+    #   prerequisite_of  the concept must be understood before attach_to
+    #   builds_on        attach_to must be understood before the concept
+    #   part_of          the concept is a part of attach_to
+    #   contains         attach_to is a part of the concept
+    #   related          adjacent, no order
+    relation: Relation
     reason: str = Field(default="", max_length=400)
 
 
-class CoveredConcept(BaseModel):
+class TaughtConcept(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     summary: str = Field(default="", max_length=400)
     evidence: list[str] = []  # 1-2 quotes; extras are ignored
-    link: ExtractedLink  # link to the current node (required: no floating nodes)
-
-
-class FrontierConcept(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    summary: str = Field(default="", max_length=400)
-    attach_to: str = Field(min_length=1, max_length=80)
-    link: ExtractedLink
+    link: ConceptLink  # required: no floating nodes
 
 
 class Extraction(BaseModel):
     current_node_evidence: list[str] = []  # 1-2 quotes; extras are ignored
-    covered: list[CoveredConcept] = []
-    frontier: list[FrontierConcept] = []
+    concepts: list[TaughtConcept] = []
 
 
-EXTRACT_SYSTEM = """You record what a learner has actually covered in a tutoring chat.
-You get the subject, the current concept, the names already on the map, and
-a conversation. Messages marked [context] were already processed; take
-evidence only from them if it is needed, and focus on the new messages.
+CARTOGRAPHER_SYSTEM = """You map what a tutoring chat taught, as concepts and links.
+You get the subject, the current topic, the concepts already on the map, and
+part of a conversation. Messages marked [context] were already processed;
+focus on the new messages and take evidence from [context] only if needed.
 
 Return:
-- current_node_evidence: 1-2 quotes showing the current concept itself was
-  taught or understood in this conversation; empty if it was not.
-- covered: other concepts this conversation actually taught. Each distinct
-  rule, contrast, term or pattern the tutor explained (or the learner showed
-  they understood) is its own concept, even if it is part of the current
-  concept. If the tutor explained it in a reply, it is covered, not frontier.
-  When one reply teaches several parts at once (an overview, a list or a
-  table), each part is its own covered concept: e.g. one node per row
-  group or list item, with that row or item as its evidence.
+- current_node_evidence: 1-2 quotes showing the current topic itself was
+  taught in the new messages; empty if it was not.
+- concepts: the other concepts the new messages actually taught. Each
+  distinct rule, contrast, term, item or pattern the tutor explained (or the
+  learner showed they understood) is its own concept, even if it is part of
+  the current topic. When one reply teaches several parts at once (an
+  overview, a list or a table), each part is its own concept, with that row
+  or item as its evidence. For each: a short name, a one-sentence summary,
+  1-2 evidence quotes, and one link.
+- Record only what was taught. A concept that was only named, or offered as
+  a next step, is not recorded at all. Returning no concepts is fine.
+
+Evidence rules:
+- Every quote is copied character for character from one message: a
+  sentence, clause or single table row of at least a few words. Do not
+  paraphrase, translate, fix spelling, join pieces or add ellipses.
+- Quote the tutor's explanation or a correct learner answer. Never quote a
+  learner's question: asking about something is not learning it.
+
+Naming rules:
+- One concept per teachable idea; short names.
 - Name concepts after the subject's own items (for example "Kanto
   starters", "Dative for position"), not after how they were presented
   ("master list", "overview", "table") or generic features they share.
-  For each: a short name, a one-sentence summary, 1-2 evidence quotes, and
-  its link to the current concept.
-- frontier: concepts that were mentioned or are clearly needed but were NOT
-  explored. For each: name, summary, attach_to (the existing or covered
-  concept it hangs off, usually the current concept), and the link.
-
-Evidence rules:
-- Every quote is copied character for character from one message of the
-  conversation: a sentence, clause or single table row of at least a few
-  words. Do not paraphrase, translate, fix spelling, join pieces or add
-  ellipses.
-- Quote the tutor's explanation or a correct learner answer. Never quote a
-  learner's question as evidence: asking about something is not learning it.
-- A concept that was only mentioned (named, offered as a next step) is
-  frontier, not covered.
-
-Concept rules:
-- One node per teachable idea; short names.
 - Reuse an existing name exactly when it means the same thing.
-- Do not list the current concept in covered or frontier.
-- At most 3 frontier concepts per attach point; prefer the most useful.
+- Do not list the current topic itself in concepts.
 
-Link rules:
-- kind "prerequisite": one concept must be understood before the other.
-  direction "before" means the listed concept comes first; "after" means
-  the concept it attaches to comes first.
-- The reason must say why the earlier concept must come first, and the
-  direction must match the reason. If you cannot state such a reason, use
-  kind "related".
-- kind "related": adjacent ideas with no required order."""
+Link rules (one link per concept; attach_to is the current topic, an
+existing concept, or another concept in this answer):
+- part_of: the concept is a part of attach_to. Use it for the items of an
+  overview (each region is part of "starter Pokemon"), a case of a rule, or
+  a component of a whole. A concept has only one whole. contains is the
+  reverse: attach_to is a part of the concept.
+- prerequisite_of: the concept must be understood before attach_to.
+  builds_on: attach_to must be understood before the concept. The reason
+  must say why the earlier one has to come first, and the relation must
+  match the reason. If you cannot state such a reason, use related.
+- related: adjacent ideas with no order and no part/whole relation."""
 
 
 SKELETON_SYSTEM = """You design learning maps.
@@ -120,25 +119,43 @@ Rules:
 - Propose at most {max_items} items in total. Proposing nothing is fine.
 - Links may connect new or existing concepts. No cycles."""
 
-TUTOR_SYSTEM = """You are Doctus, a patient tutor.
-Answer what the learner asked, in full, in your first reply. If they ask
-for "all" of something, give all of it at once, compactly organised (a
-list or table), rather than one part per message. Do not hold back the
-rest of an answer to quiz them first.
-After answering, you may offer one short check question or a way to go
-deeper, but the learner decides where to go next.
-Connect the concept to its prerequisites when useful. If the learner seems
-weak on a prerequisite (low strength below), suggest reviewing it briefly.
+# ---------- tutor ----------
+
+TUTOR_SYSTEM = """You are Doctus: a strong general assistant who is also an excellent teacher.
+
+How you answer:
+- Answer what was asked, fully and well organised: explanation, worked
+  examples, and a table, list or code block when it makes things clearer.
+  Match the length to the question; a quick question gets a short answer, a
+  big one gets a thorough one.
+- If the learner asks for all of something, give all of it in this reply.
+- Do not end every reply with a question. Check understanding only when it
+  fits naturally, or when the learner asks to be tested.
+- Follow the learner's lead, tangents included. You may suggest where to go
+  next in a sentence, without pushing.
+- Correct mistakes clearly and kindly: what was wrong, the right version,
+  and why.
+- When you are not sure, say so instead of guessing.
+
+Voice: warm, curious, a little wit. Plain language. No filler, no flattery
+("Great question!"), no hype. Give your opinion when asked.
+
+Private notes: below is background on where this topic sits among what the
+learner has already been taught. Use it only to pitch your answer, for
+example by briefly recapping something they have not covered before relying
+on it, or by connecting to something they already know. Never mention these
+notes, or any graph, map, node, level, strength or "context", to the learner.
 
 {scope}
 
-{context}"""
+{notes}"""
 
-ORIGIN_SCOPE = """This chat is the subject's starting point. Give the big picture of
-the whole subject: cover every major part briefly so the learner sees the
-full territory. Detail comes later, in each part's own chat."""
+ORIGIN_SCOPE = """This conversation is where the subject starts. Take your cue from how the
+learner opens. A broad opening ("teach me X", "what is X?", "all of X") gets
+a big-picture overview that covers every major part briefly, so they can see
+the whole territory; detail can come later. A specific question gets a
+direct answer to that question, with at most one sentence placing it in the
+wider subject. Do not force an overview."""
 
-TOPIC_SCOPE = """This chat is about one concept inside a larger subject. Stay on it;
-mention related concepts by name rather than teaching them in full.
-Suggested next topics in the context below are places the learner could
-go next; point to them when they come up."""
+TOPIC_SCOPE = """This conversation is about one topic within the subject. Keep the focus
+there; mention neighbouring topics by name rather than teaching them in full."""

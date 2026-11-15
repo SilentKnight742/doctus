@@ -88,7 +88,7 @@ def test_cycle_is_rejected(store):
 def test_self_edge_is_rejected(store):
     s = store.create_subject("v1", "Transformers")
     _accept_nodes(store, s["id"], "A")
-    with pytest.raises(Conflict, match="cycle"):
+    with pytest.raises(Conflict, match="self-link"):
         _accept_edge(store, s["id"], "A", "A")
 
 

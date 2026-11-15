@@ -1,13 +1,17 @@
-"""Builds the context a topic chat is given, and records exactly what was used.
+"""Builds the tutor's private notes for a topic chat, and records exactly what
+was used.
 
-The `used` record is returned to the client so the UI can show a
-"context used" panel: what the model actually saw for each reply.
+The notes say where the topic sits among what the learner has been taught:
+its prerequisites, its part_of parent and parts, and other direct
+neighbours. The `used` record is returned to the client so the UI can show a
+"context used" panel. Recall strength is left out until a mastery rule exists.
 """
 
 from dataclasses import dataclass
 
-from .mastery import MasteryModel
 from .store import Node, Store
+
+MAX_NEARBY = 10
 
 
 @dataclass
@@ -16,75 +20,48 @@ class TopicContext:
     used: dict
 
 
-def _strength_label(strength: float) -> str:
-    if strength == 0:
-        return "untested"
-    return f"{strength:.2f}"
+def _brief(n: Node) -> dict:
+    return {"id": n.id, "name": n.name, "summary": n.summary}
 
 
-def build_topic_context(
-    store: Store, mastery: MasteryModel, subject: dict, node: Node, now: float
-) -> TopicContext:
+def build_topic_context(store: Store, subject: dict, node: Node) -> TopicContext:
     prereqs = store.prerequisites(node.id)
-    dependents = store.dependents(node.id)
-    covered_neighbours, frontier = [], []
-    seen: set[int] = set()
-    for other, edge in store.neighbours(node.id):
-        if other.id in seen:
-            continue
-        seen.add(other.id)
-        if other.status == "covered":
-            covered_neighbours.append(
-                {
-                    "id": other.id,
-                    "name": other.name,
-                    "summary": other.summary,
-                    "kind": edge.kind,
-                }
-            )
-        elif other.status == "frontier":
-            frontier.append({"id": other.id, "name": other.name})
+    parent = store.part_of_parent(node.id)
+    parts = store.parts(node.id)
 
-    prereq_info = [
-        {
-            "id": p.id,
-            "name": p.name,
-            "summary": p.summary,
-            "strength": round(mastery.strength(p.mastery, now), 3),
-        }
-        for p in prereqs
-    ]
+    shown = {node.id, *(p.id for p in prereqs), *(p.id for p in parts)}
+    if parent:
+        shown.add(parent.id)
+    nearby: list[Node] = []
+    for other, _edge in store.neighbours(node.id):
+        if other.id not in shown and len(nearby) < MAX_NEARBY:
+            shown.add(other.id)
+            nearby.append(other)
+
+    def line(n: Node) -> str:
+        return f"- {n.name}: {n.summary}" if n.summary else f"- {n.name}"
 
     lines = [
         f"Subject: {subject['title']}",
         f"Learner's goal: {subject['goal'] or 'not stated'}",
-        "",
-        f"Current concept: {node.name}",
-        f"Summary: {node.summary or 'none yet'}",
-        f"Learner's strength on it: {_strength_label(mastery.strength(node.mastery, now))}",
-        "",
-        "Prerequisites:" if prereq_info else "Prerequisites: none recorded",
+        f"Current topic: {node.name}" + (f" ({node.summary})" if node.summary else ""),
     ]
-    for p in prereq_info:
-        lines.append(f"- {p['name']} (strength {_strength_label(p['strength'])}): {p['summary']}")
-    if dependents:
-        lines += ["", "Concepts that build on this one: " + ", ".join(d.name for d in dependents)]
-    if covered_neighbours:
-        lines += ["", "Nearby concepts the learner has already covered:"]
-        lines += [f"- {c['name']}: {c['summary']}" for c in covered_neighbours]
-    if frontier:
-        lines += [
-            "",
-            "Suggested next topics (not explored yet): " + ", ".join(f["name"] for f in frontier),
-        ]
+    if prereqs:
+        lines += ["", "Taught earlier and needed first:", *map(line, prereqs)]
+    if parent:
+        lines += ["", f"Part of: {parent.name}"]
+    if parts:
+        lines += ["", "Its parts taught so far:", *map(line, parts)]
+    if nearby:
+        lines += ["", "Nearby topics taught so far:", *map(line, nearby)]
 
     return TopicContext(
         text="\n".join(lines),
         used={
-            "node": {"id": node.id, "name": node.name, "summary": node.summary},
-            "prerequisites": prereq_info,
-            "dependents": [{"id": d.id, "name": d.name} for d in dependents],
-            "covered_neighbours": covered_neighbours,
-            "frontier": frontier,
+            "node": _brief(node),
+            "prerequisites": [_brief(p) for p in prereqs],
+            "part_of": _brief(parent) if parent else None,
+            "parts": [_brief(p) for p in parts],
+            "nearby": [_brief(n) for n in nearby],
         },
     )
