@@ -1,7 +1,7 @@
-from .base import LLM, LLMError, Turn
+from .base import LLM, LLMError, RateLimited, Turn
 from .fake import FakeLLM
 
-__all__ = ["LLM", "FakeLLM", "LLMError", "Turn", "make_llm"]
+__all__ = ["LLM", "FakeLLM", "LLMError", "RateLimited", "Turn", "make_llm"]
 
 
 def make_llm(settings, model: str | None = None) -> LLM:

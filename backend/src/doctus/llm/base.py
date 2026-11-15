@@ -23,6 +23,14 @@ class LLMError(Exception):
     """The model failed or returned something unusable."""
 
 
+class RateLimited(LLMError):
+    """The provider refused the call for rate or quota reasons (HTTP 429)."""
+
+    def __init__(self, message: str, retry_after: int = 60):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 @dataclass(frozen=True)
 class Turn:
     role: str  # "user" or "assistant"

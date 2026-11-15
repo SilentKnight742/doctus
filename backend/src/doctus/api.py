@@ -5,8 +5,9 @@ sends it as the `X-Doctus-Visitor` header. All data is scoped to it.
 """
 
 import time
+from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from . import tutor
@@ -14,9 +15,14 @@ from .cartographer import Busy, CartographerRunner
 from .config import Settings, load_settings
 from .context import build_topic_context
 from .graph import distances_from, propose_skeleton, propose_update
-from .llm import LLM, LLMError, Turn, make_llm
+from .llm import LLM, LLMError, RateLimited, Turn, make_llm
 from .mastery import MasteryModel, PlaceholderDecayModel
 from .store import Conflict, NotFound, Store
+
+# SQLite integers are signed 64-bit; anything outside 1..MAX_ID cannot be an
+# id, and would overflow the driver, so it is rejected as 422 up front.
+MAX_ID = 2**63 - 1
+Id = Annotated[int, Path(ge=1, le=MAX_ID)]
 
 
 class NewSubject(BaseModel):
@@ -28,7 +34,7 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     # The node the learner came from; recorded on the trail when they
     # arrive at this node's chat.
-    from_node_id: int | None = None
+    from_node_id: int | None = Field(default=None, ge=1, le=MAX_ID)
 
 
 def visitor_token(x_doctus_visitor: str = Header(min_length=16, max_length=128)) -> str:
@@ -69,6 +75,10 @@ def create_app(
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        except RateLimited as exc:
+            raise HTTPException(
+                429, str(exc), headers={"Retry-After": str(exc.retry_after)}
+            ) from exc
         except LLMError as exc:
             raise HTTPException(502, str(exc)) from exc
 
@@ -100,7 +110,7 @@ def create_app(
         return guard(store.create_subject, visitor, body.title, body.goal)
 
     @app.get("/api/subjects/{subject_id}/graph")
-    def get_graph(subject_id: int, visitor: str = Depends(visitor_token)):
+    def get_graph(subject_id: Id, visitor: str = Depends(visitor_token)):
         subject = guard(store.get_subject, visitor, subject_id)
         now = clock()
         nodes = store.list_nodes(subject_id)
@@ -129,7 +139,7 @@ def create_app(
         }
 
     @app.get("/api/subjects/{subject_id}/graph/status")
-    def graph_status(subject_id: int, visitor: str = Depends(visitor_token)):
+    def graph_status(subject_id: Id, visitor: str = Depends(visitor_token)):
         """Cheap poll target: graph_version plus cartographer idle|running|error."""
         guard(store.get_subject, visitor, subject_id)
         return store.graph_status(subject_id)
@@ -137,28 +147,28 @@ def create_app(
     # ---------- proposals ----------
 
     @app.post("/api/subjects/{subject_id}/skeleton")
-    def skeleton(subject_id: int, visitor: str = Depends(visitor_token)):
+    def skeleton(subject_id: Id, visitor: str = Depends(visitor_token)):
         subject = guard(store.get_subject, visitor, subject_id)
         proposals = guard(propose_skeleton, store, llm, subject)
         return [proposal_view(p) for p in proposals]
 
     @app.get("/api/subjects/{subject_id}/proposals")
-    def list_proposals(subject_id: int, visitor: str = Depends(visitor_token)):
+    def list_proposals(subject_id: Id, visitor: str = Depends(visitor_token)):
         guard(store.get_subject, visitor, subject_id)
         return [proposal_view(p) for p in store.list_proposals(subject_id)]
 
     @app.post("/api/proposals/{proposal_id}/accept")
-    def accept(proposal_id: int, visitor: str = Depends(visitor_token)):
+    def accept(proposal_id: Id, visitor: str = Depends(visitor_token)):
         return proposal_view(guard(store.accept_proposal, visitor, proposal_id))
 
     @app.post("/api/proposals/{proposal_id}/reject")
-    def reject(proposal_id: int, visitor: str = Depends(visitor_token)):
+    def reject(proposal_id: Id, visitor: str = Depends(visitor_token)):
         return proposal_view(guard(store.reject_proposal, visitor, proposal_id))
 
     # ---------- topic chat ----------
 
     @app.get("/api/nodes/{node_id}")
-    def get_node(node_id: int, visitor: str = Depends(visitor_token)):
+    def get_node(node_id: Id, visitor: str = Depends(visitor_token)):
         node = guard(store.get_node, visitor, node_id)
         subject = store.get_subject(visitor, node.subject_id)
         now = clock()
@@ -190,7 +200,7 @@ def create_app(
 
     @app.post("/api/nodes/{node_id}/chat")
     def topic_chat(
-        node_id: int,
+        node_id: Id,
         body: ChatIn,
         background: BackgroundTasks,
         visitor: str = Depends(visitor_token),
@@ -232,7 +242,7 @@ def create_app(
         }
 
     @app.post("/api/nodes/{node_id}/extract")
-    def extract(node_id: int, visitor: str = Depends(visitor_token)):
+    def extract(node_id: Id, visitor: str = Depends(visitor_token)):
         """Run the cartographer now, synchronously (same per-subject lock)."""
         node = guard(store.get_node, visitor, node_id)
         subject = store.get_subject(visitor, node.subject_id)
@@ -245,7 +255,7 @@ def create_app(
         return summary
 
     @app.post("/api/nodes/{node_id}/update-graph")
-    def update_graph(node_id: int, visitor: str = Depends(visitor_token)):
+    def update_graph(node_id: Id, visitor: str = Depends(visitor_token)):
         node = guard(store.get_node, visitor, node_id)
         subject = store.get_subject(visitor, node.subject_id)
         history = store.recent_messages(subject["id"], node.id, settings.recent_turns_in_context)
