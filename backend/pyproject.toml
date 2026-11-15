@@ -32,6 +32,8 @@ addopts = "-q --strict-markers -m 'not live'"
 filterwarnings = [
     # google-genai's generated types.py has invalid escapes in docstrings (Python 3.12+).
     "ignore:\"\\\\/\" is an invalid escape sequence:SyntaxWarning",
+    # ...and the same issue as reported by Python 3.11.
+    "ignore:invalid escape sequence:DeprecationWarning",
 ]
 markers = [
     "live: calls the real Gemini API (needs GEMINI_API_KEY; run with -m live)",
