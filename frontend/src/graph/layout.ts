@@ -28,8 +28,10 @@ export function layout(
   edges: GraphEdge[],
   originId: number | null,
   previous?: Map<number, Point>,
+  /** Half the space each node needs (defaults to NODE_RADIUS). */
+  radiusOf: (id: number) => number = () => NODE_RADIUS,
 ): Map<number, Point> {
-  const fresh = relax(freshLayout(nodeIds, edges, originId), edges, originId)
+  const fresh = relax(freshLayout(nodeIds, edges, originId), edges, originId, radiusOf)
   if (!previous || previous.size === 0) return fresh
   return stabilise(nodeIds, edges, fresh, previous)
 }
@@ -186,14 +188,19 @@ function freshLayout(nodeIds: number[], edges: GraphEdge[], originId: number | n
  * collision push between nodes, a light pull toward the centre, and the
  * origin pinned at (0, 0). Fixed iteration count, so still deterministic.
  */
-export function relax(seed: Map<number, Point>, edges: GraphEdge[], originId: number | null) {
+export function relax(
+  seed: Map<number, Point>,
+  edges: GraphEdge[],
+  originId: number | null,
+  radiusOf: (id: number) => number = () => NODE_RADIUS,
+) {
   const ids = [...seed.keys()].sort((a, b) => a - b)
   const pos = new Map([...seed].map(([id, p]) => [id, { ...p }]))
   const pinned = originId !== null && pos.has(originId) ? originId : null
   const springs = edges
     .filter((e) => pos.has(e.source) && pos.has(e.target) && e.source !== e.target)
     .map((e) => ({ a: e.source, b: e.target, len: e.kind === 'part_of' ? 210 : 280, k: e.kind === 'part_of' ? 0.08 : 0.03 }))
-  const minDist = NODE_RADIUS * 2
+  const radius = new Map(ids.map((id) => [id, radiusOf(id)]))
   const ITER = 300
   for (let it = 0; it < ITER; it++) {
     const cool = 1 - it / ITER
@@ -217,6 +224,7 @@ export function relax(seed: Map<number, Point>, edges: GraphEdge[], originId: nu
         let dx = q.x - p.x
         let dy = q.y - p.y
         let d = Math.hypot(dx, dy)
+        const minDist = radius.get(ids[i])! + radius.get(ids[j])!
         if (d >= minDist) continue
         if (d === 0) {
           dx = 1

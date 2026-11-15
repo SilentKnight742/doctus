@@ -565,7 +565,7 @@ h2 {
   height: var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--color-text-muted);
-  animation: typing 1.2s infinite ease-in-out;
+  animation: typing var(--duration-typing) infinite ease-in-out;
 }
 
 .typing span:nth-child(2) {
@@ -769,13 +769,13 @@ h2 {
 
 .concept {
   position: relative;
-  width: var(--node-width);
-  padding: var(--node-padding);
+  width: var(--node-size);
+  padding: calc(var(--node-padding-y) * var(--node-scale)) calc(var(--node-padding-x) * var(--node-scale));
   border: var(--border-width) solid var(--color-node-border);
-  border-radius: var(--radius-md);
+  border-radius: calc(var(--radius-md) * var(--node-scale));
   background: var(--color-node-bg);
   color: var(--color-text);
-  font-size: var(--font-size-sm);
+  font-size: calc(var(--node-font-size) * var(--node-scale));
   line-height: var(--line-height-tight);
   text-align: center;
   cursor: pointer;
@@ -802,8 +802,8 @@ h2 {
   font-weight: var(--font-weight-bold);
 }
 
-.concept.is-collapsed {
-  /* a stacked look for a folded group */
+.concept.is-group {
+  /* a stacked look: deeper parts are merged into this node */
   box-shadow:
     var(--space-1) var(--space-1) 0 calc(-1 * var(--border-width)) var(--color-node-bg),
     var(--space-1) var(--space-1) 0 0 var(--color-node-border);
@@ -823,16 +823,16 @@ h2 {
   }
 }
 
-.concept-count {
-  position: absolute;
-  top: calc(-1 * var(--space-2));
-  right: calc(-1 * var(--space-2));
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-pill);
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+/* Grouping: merged nodes slide into their group and fade; split ones slide out. */
+.graph-canvas:not(.graph-mini) .react-flow__node {
+  transition:
+    transform var(--duration-group) ease,
+    opacity var(--duration-group) ease;
+}
+
+.react-flow__node.is-merged {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .concept-handle {
@@ -843,6 +843,7 @@ h2 {
 }
 
 .concept-mini {
+  --node-scale: 1;
   width: var(--space-4);
   height: var(--space-4);
   padding: 0;
@@ -881,10 +882,6 @@ h2 {
   stroke-width: calc(var(--edge-width-prerequisite) * 2);
 }
 
-.concept-edge-count {
-  fill: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-}
 
 /* ---------- floating chat window ---------- */
 

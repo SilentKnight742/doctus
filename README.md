@@ -67,7 +67,8 @@ Implemented:
 - Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
   and the shortest `path` between two nodes.
 - Trail with `from_node_id`; distance from the origin.
-- 115 offline tests; one opt-in live Gemini test.
+- 118 backend offline tests; one opt-in live Gemini test. 24 frontend
+  unit tests (Vitest).
 
 In progress (M2, UI, `frontend/`): React + TypeScript + Vite, React Flow.
 
@@ -77,11 +78,17 @@ In progress (M2, UI, `frontend/`): React + TypeScript + Vite, React Flow.
   "rate limited, try again in N s"), a trail breadcrumb, a node detail
   drawer (summary, evidence quotes, connections) and a live mini graph.
 - Graph screen: the full graph; selecting a node opens its chat in a
-  floating window (minimise, close, expand to the chat screen).
-- Semantic zoom: below zoom 0.55 only `part_of` roots are shown, from 0.55
-  to 1.0 depth 0-1, above 1.0 everything (with a small margin so it does
-  not flicker). Folded nodes show a "+N" count; edges between folded groups
-  are merged with a count; edges inside a group are hidden.
+  floating window (minimise, close, expand to the chat screen). Opening a
+  chat records a trail step (`POST /api/nodes/{id}/visit`).
+- Semantic zoom by size: a node at `part_of` depth d is drawn at
+  S(d) = 160 px × 0.75^d. When S(d) × zoom drops below 48 px it merges into
+  its nearest visible `part_of` ancestor, which stays under its own name
+  and grows with the square root of what it holds (capped). It splits out
+  again above 48 × 1.15 px. The origin and its direct parts, and any node
+  without a `part_of` parent, never merge, and the furthest zoom-out is
+  48 / 160 = 0.3. Edges inside a group are hidden; parallel edges between
+  groups are merged into one thicker line. The constants are in
+  `frontend/src/theme.css`.
 - Layout: radial seed (origin at the centre, `part_of` children around
   their parent, other topics on rings by distance) relaxed by a short,
   deterministic spring pass. Positions are kept as the graph grows; "Tidy
@@ -136,6 +143,14 @@ make build  # production build of the frontend
 make fmt    # apply ruff fixes and formatting (backend)
 ```
 
+Screenshots of a running dev session (not part of CI; uses Playwright,
+optionally with a system Chromium):
+
+```bash
+cd frontend && CHROMIUM_PATH=/usr/bin/chromium node scripts/screenshots.mjs \
+  --subject 1 --visitor <token> --out screenshots --chat <node> --window <node>
+```
+
 The opt-in live test makes one real chat call and one structured call:
 
 ```bash
@@ -153,6 +168,8 @@ GET  /api/subjects/{id}/graph/status     {graph_version, cartographer, error} (p
 GET  /api/nodes/{id}                     node, evidence, edges, context, chat history
 POST /api/nodes/{id}/chat                {message, from_node_id?} -> reply, context_used,
                                          graph_version, cartographer
+POST /api/nodes/{id}/visit               {from_node_id?} -> record a trail step on opening
+                                         a chat (no repeat of the last step)
 POST /api/nodes/{id}/extract             run the cartographer now (409 while one is running)
 
 # Older starter-map flow, outside the main flow:

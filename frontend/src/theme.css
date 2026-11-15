@@ -75,8 +75,21 @@
   --shadow-overlay: 0 8px 28px var(--color-overlay-shadow);
 
   /* ---- graph sizes ---- */
-  --node-width: 168px;
-  --node-padding: var(--space-2) var(--space-3);
+  /* Semantic zoom (unitless; read by src/graph/zoom.ts):
+     node base size S(d) = base * ratio^d px; a node merges into its nearest
+     visible part_of ancestor when S(d) * zoom < min-screen, and splits again
+     above min-screen * split-factor. Groups grow by
+     min(1 + group-growth * sqrt(n), group-cap). Max zoom-out = min-screen / base. */
+  --zoom-node-base: 160;
+  --zoom-node-ratio: 0.75;
+  --zoom-min-screen: 48;
+  --zoom-split-factor: 1.15;
+  --zoom-group-growth: 0.2;
+  --zoom-group-cap: 1.5;
+  /* A node's text and padding scale with its size (set per node as --node-scale). */
+  --node-font-size: 15px;
+  --node-padding-y: 9px;
+  --node-padding-x: 12px;
   --edge-width-prerequisite: 1.5px;
   --edge-width-part-of: 1px;
   --edge-width-related: 1.25px;
@@ -95,6 +108,8 @@
   /* ---- motion ---- */
   --duration-fast: 120ms;
   --duration-new-highlight: 2500ms;
+  --duration-group: 320ms;
+  --duration-typing: 1.2s;
 }
 
 @media (prefers-color-scheme: dark) {

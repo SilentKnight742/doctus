@@ -32,15 +32,11 @@ export function FloatingEdge({ id, source, target, data, markerEnd }: EdgeProps<
   const p1 = border(a, b)
   const p2 = border(b, a)
   const path = `M ${p1.x},${p1.y} L ${p2.x},${p2.y}`
-  const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
   return (
     <g className={`concept-edge concept-edge-${data.kind}${data.count > 1 ? ' is-merged' : ''}`}>
-      <path id={id} d={path} className="concept-edge-path" markerEnd={markerEnd} fill="none" />
-      {data.count > 1 && !data.mini && (
-        <text x={mid.x} y={mid.y} className="concept-edge-count" textAnchor="middle" dy="-4">
-          ×{data.count}
-        </text>
-      )}
+      <path id={id} d={path} className="concept-edge-path" markerEnd={markerEnd} fill="none">
+        {data.count > 1 && <title>{data.count} links</title>}
+      </path>
     </g>
   )
 }

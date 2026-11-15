@@ -4,6 +4,8 @@ import type { ReactNode } from 'react'
 import { api } from '../api/client'
 import type { ContextUsed, GraphStatus } from '../api/types'
 import { layout, type Point } from '../graph/layout'
+import { childrenOf } from '../graph/model'
+import { groupSize, readSizeParams, zoomDepths, zoomParents } from '../graph/zoom'
 import { pollInterval } from '../lib/poll'
 import { Ctx, type SubjectState } from './context'
 
@@ -67,12 +69,16 @@ export function SubjectProvider({ subjectId, children }: { subjectId: number; ch
     void layoutEpoch
     if (!graph) return new Map<number, Point>()
     const prev = savedPositions.get(subjectId)
-    const next = layout(
-      graph.nodes.map((n) => n.id),
-      graph.edges,
-      graph.subject.origin_node_id,
-      prev,
-    )
+    const ids = graph.nodes.map((n) => n.id)
+    const origin = graph.subject.origin_node_id
+    // Leave room for each node at its largest (as a group of all its parts).
+    const params = readSizeParams()
+    const depth = zoomDepths(ids, graph.edges, origin)
+    const kids = childrenOf(zoomParents(graph.edges, origin), ids)
+    const count = (id: number): number =>
+      (kids.get(id) ?? []).reduce((n, k) => n + 1 + count(k), 0)
+    const radiusOf = (id: number) => groupSize(depth.get(id) ?? 0, count(id), params) / 2 + 14
+    const next = layout(ids, graph.edges, origin, prev, radiusOf)
     savedPositions.set(subjectId, next)
     return next
   }, [graph, subjectId, layoutEpoch])
