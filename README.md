@@ -68,7 +68,7 @@ Implemented:
 - Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
   and the shortest `path` between two nodes.
 - Trail with `from_node_id`; distance from the origin.
-- 71 offline tests; one opt-in live Gemini test.
+- 115 offline tests; one opt-in live Gemini test.
 
 Planned (M2, UI): React + Vite frontend with a chat screen, a graph screen
 with semantic zoom, and a live mini graph.
@@ -167,6 +167,9 @@ docs/eval/         small pilot results (not benchmarks)
   separate nodes.
 - The evidence check proves a quote is in the chat, not that the concept was
   taught well; the model still chooses which concepts to record.
+- The tutor on `gemini-3.5-flash-lite` makes small factual slips (5 in about
+  16 replies in testing). The evidence check proves a quote is in the chat,
+  not that what it says is correct. A stronger tutor model is planned.
 - Narrative subjects (for example a TV episode) produce plot or cause links
   rather than learning dependencies.
 - Tests and mastery updates are not wired to endpoints yet.

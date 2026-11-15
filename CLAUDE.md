@@ -42,14 +42,14 @@ Every learner message touches two separate layers with separate prompts:
    conversation, not from forcing a question-and-answer format.
 
 ## Status (2026-11-15)
-- Backend done: store, LLM layer (Gemini + FakeLLM), exploration graph
-  (covered/frontier/evidence/trail/dismiss), extraction, origin chat that
-  answers the whole question at once. 64 offline tests pass.
-- M0 (`chore/repo-hygiene`, PR open): history rewritten to the noreply
-  identity and force-pushed once (done; no more force-pushes). Backend moved
-  to `backend/` (uv + lockfile, ruff, `make dev|test|lint|fmt`); CI runs
-  backend lint and tests on Python 3.11; README rewritten for the current
-  design; pilots saved in `docs/eval/`.
+- M0 (`chore/repo-hygiene`) merged: noreply history (force-pushed once; no
+  more force-pushes), backend in `backend/` (uv + lockfile, ruff,
+  `make dev|test|lint|fmt`), CI on Python 3.11, README, pilots in `docs/eval/`.
+- M1 (`feat/tutor-and-cartographer`) merged: tutor and cartographer split
+  (cartographer runs in the background after every exchange, `graph_version`
+  + `cartographer: idle | running | error`), `part_of` edges with one parent
+  and per-kind cycle checks, frontier removed, traversal helpers, 429 with
+  `Retry-After`. 115 offline tests pass; 5 live scenarios passed.
 - Local dev: `backend/.env` and `backend/doctus.db` (both git-ignored).
   `make test` uses `uv run python -m pytest` in `backend/.venv`, which avoids
   Kali's system pytest.
@@ -57,7 +57,10 @@ Every learner message touches two separate layers with separate prompts:
   runs on German (5 covered, 8 quotes verified, 0 dropped) and "starter Pokemon
   of all regions" (9 covered, 11 verified, 0 dropped). Narrative subjects (a TV
   episode) produce plot/cause links, not learning dependencies: a known limit.
-- No frontend yet. Next: M1 after M0 is merged.
+- Known limit: the tutor on `gemini-3.5-flash-lite` makes small factual slips
+  (5 in about 16 replies in testing). The evidence check proves a quote is in
+  the chat, not that it is correct. A stronger tutor model is planned.
+- In progress: M2 (`feat/ui`).
 
 ## Git workflow (same as Videre)
 - Never commit or push directly to `main`. One branch per milestone
