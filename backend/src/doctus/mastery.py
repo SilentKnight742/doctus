@@ -72,7 +72,7 @@ class PlaceholderDecayModel(MasteryModel):
         elif score < self.weak_score:
             stability /= 2
         stability = min(self.max_stability_days, max(self.min_stability_days, stability))
-        history = list(state.get("history", []))[-19:] + [{"at": now, "score": score}]
+        history = [*list(state.get("history", []))[-19:], {"at": now, "score": score}]
         return {
             "m": current + self.learning_rate * (score - current),
             "stability_days": stability,

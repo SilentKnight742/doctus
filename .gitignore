@@ -1,6 +1,28 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
 __pycache__/
-*.egg-info/
+*.py[cod]
 .venv/
 .pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# sqlite
 *.db
-.env
+*.db-wal
+*.db-shm
+
+# node (frontend arrives in M2)
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store

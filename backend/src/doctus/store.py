@@ -281,9 +281,7 @@ class Store:
         return self._node(row)
 
     def list_nodes(self, subject_id: int) -> list[Node]:
-        rows = self._all(
-            "SELECT * FROM nodes WHERE subject_id = ? ORDER BY id", (subject_id,)
-        )
+        rows = self._all("SELECT * FROM nodes WHERE subject_id = ? ORDER BY id", (subject_id,))
         return [self._node(r) for r in rows]
 
     def find_node_by_name(self, subject_id: int, name: str) -> Node | None:
@@ -313,8 +311,15 @@ class Store:
                 """INSERT INTO nodes (subject_id, name, name_key, summary, created_at,
                                       status, covered_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (subject_id, name, name_key(name), summary.strip(), now, status,
-                 now if status == "covered" else None),
+                (
+                    subject_id,
+                    name,
+                    name_key(name),
+                    summary.strip(),
+                    now,
+                    status,
+                    now if status == "covered" else None,
+                ),
             )
         return self.node_by_id(cur.lastrowid)
 
@@ -361,9 +366,7 @@ class Store:
     # ---------- edges ----------
 
     def list_edges(self, subject_id: int) -> list[Edge]:
-        rows = self._all(
-            "SELECT * FROM edges WHERE subject_id = ? ORDER BY id", (subject_id,)
-        )
+        rows = self._all("SELECT * FROM edges WHERE subject_id = ? ORDER BY id", (subject_id,))
         return [self._edge(r) for r in rows]
 
     def prerequisites(self, node_id: int) -> list[Node]:
@@ -459,9 +462,7 @@ class Store:
         return Evidence(cur.lastrowid, node_id, message_id, quote)
 
     def list_evidence(self, node_id: int) -> list[Evidence]:
-        rows = self._all(
-            "SELECT * FROM node_evidence WHERE node_id = ? ORDER BY id", (node_id,)
-        )
+        rows = self._all("SELECT * FROM node_evidence WHERE node_id = ? ORDER BY id", (node_id,))
         return [Evidence(r["id"], r["node_id"], r["message_id"], r["quote"]) for r in rows]
 
     def last_trail_step(self, subject_id: int) -> TrailStep | None:
@@ -514,7 +515,9 @@ class Store:
 
     # ---------- proposals ----------
 
-    def add_proposals(self, subject_id: int, items: list[tuple[str, dict]], origin: str) -> list[Proposal]:
+    def add_proposals(
+        self, subject_id: int, items: list[tuple[str, dict]], origin: str
+    ) -> list[Proposal]:
         now = self._clock()
         ids = []
         with self.atomic():
@@ -525,7 +528,9 @@ class Store:
                     (subject_id, kind, json.dumps(payload), origin, now),
                 )
                 ids.append(cur.lastrowid)
-        return [self._proposal(self._one("SELECT * FROM proposals WHERE id = ?", (i,))) for i in ids]
+        return [
+            self._proposal(self._one("SELECT * FROM proposals WHERE id = ?", (i,))) for i in ids
+        ]
 
     @staticmethod
     def _proposal(row) -> Proposal:
@@ -571,15 +576,15 @@ class Store:
                 prereq = self.find_node_by_name(p.subject_id, p.payload["prerequisite"])
                 node = self.find_node_by_name(p.subject_id, p.payload["concept"])
                 missing = [
-                    n for n, found in (
+                    n
+                    for n, found in (
                         (p.payload["prerequisite"], prereq),
                         (p.payload["concept"], node),
-                    ) if found is None
+                    )
+                    if found is None
                 ]
                 if missing:
-                    raise Conflict(
-                        "Accept these concepts first: " + ", ".join(missing)
-                    )
+                    raise Conflict("Accept these concepts first: " + ", ".join(missing))
                 self.insert_edge(
                     p.subject_id, prereq.id, node.id, "prerequisite", p.payload.get("reason", "")
                 )
@@ -638,7 +643,10 @@ class Store:
         ]
 
     def node_messages(
-        self, node_id: int, after_id: int | None = None, before_id: int | None = None,
+        self,
+        node_id: int,
+        after_id: int | None = None,
+        before_id: int | None = None,
         limit: int | None = None,
     ) -> list[Message]:
         """Messages of one topic chat in id order, optionally after/before an id.

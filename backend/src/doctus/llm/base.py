@@ -25,7 +25,7 @@ class LLMError(Exception):
 
 @dataclass(frozen=True)
 class Turn:
-    role: str      # "user" or "assistant"
+    role: str  # "user" or "assistant"
     content: str
 
 

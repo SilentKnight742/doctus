@@ -46,8 +46,11 @@ def _canned(schema_name: str) -> dict:
                 {"name": "Core technique", "summary": "The main method of the subject."},
             ],
             "links": [
-                {"prerequisite": "Foundations", "concept": "Core technique",
-                 "reason": "The technique builds on the foundations."},
+                {
+                    "prerequisite": "Foundations",
+                    "concept": "Core technique",
+                    "reason": "The technique builds on the foundations.",
+                },
             ],
         }
     return {}

@@ -9,7 +9,7 @@ from dotenv import find_dotenv, load_dotenv
 @dataclass(frozen=True)
 class Settings:
     db_path: str
-    llm_provider: str          # "gemini" or "fake"
+    llm_provider: str  # "gemini" or "fake"
     gemini_api_key: str | None
     gemini_model: str
     max_proposals_per_update: int
