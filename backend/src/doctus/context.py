@@ -34,10 +34,14 @@ def build_topic_context(
             continue
         seen.add(other.id)
         if other.status == "covered":
-            covered_neighbours.append({
-                "id": other.id, "name": other.name, "summary": other.summary,
-                "kind": edge.kind,
-            })
+            covered_neighbours.append(
+                {
+                    "id": other.id,
+                    "name": other.name,
+                    "summary": other.summary,
+                    "kind": edge.kind,
+                }
+            )
         elif other.status == "frontier":
             frontier.append({"id": other.id, "name": other.name})
 
@@ -69,8 +73,10 @@ def build_topic_context(
         lines += ["", "Nearby concepts the learner has already covered:"]
         lines += [f"- {c['name']}: {c['summary']}" for c in covered_neighbours]
     if frontier:
-        lines += ["", "Suggested next topics (not explored yet): "
-                  + ", ".join(f["name"] for f in frontier)]
+        lines += [
+            "",
+            "Suggested next topics (not explored yet): " + ", ".join(f["name"] for f in frontier),
+        ]
 
     return TopicContext(
         text="\n".join(lines),

@@ -53,13 +53,13 @@ def create_app(
         try:
             return fn(*args, **kwargs)
         except NotFound as exc:
-            raise HTTPException(404, str(exc))
+            raise HTTPException(404, str(exc)) from exc
         except Conflict as exc:
-            raise HTTPException(409, str(exc))
+            raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(422, str(exc))
+            raise HTTPException(422, str(exc)) from exc
         except LLMError as exc:
-            raise HTTPException(502, str(exc))
+            raise HTTPException(502, str(exc)) from exc
 
     def node_view(node, now):
         return {
@@ -101,8 +101,13 @@ def create_app(
             "subject": subject,
             "nodes": [{**node_view(n, now), "distance": dist.get(n.id)} for n in nodes],
             "edges": [
-                {"id": e.id, "source": e.from_id, "target": e.to_id, "kind": e.kind,
-                 "reason": e.reason}
+                {
+                    "id": e.id,
+                    "source": e.from_id,
+                    "target": e.to_id,
+                    "kind": e.kind,
+                    "reason": e.reason,
+                }
                 for e in edges
             ],
             "trail": [
@@ -146,14 +151,18 @@ def create_app(
         return {
             "node": node_view(node, now),
             "evidence": [
-                {"message_id": e.message_id, "quote": e.quote}
-                for e in store.list_evidence(node.id)
+                {"message_id": e.message_id, "quote": e.quote} for e in store.list_evidence(node.id)
             ],
             # Every edge touching this node, by id. Nodes are flat: a node
             # opened from another is just a node joined to it by an edge.
             "edges": [
-                {"id": e.id, "source": e.from_id, "target": e.to_id, "kind": e.kind,
-                 "reason": e.reason}
+                {
+                    "id": e.id,
+                    "source": e.from_id,
+                    "target": e.to_id,
+                    "kind": e.kind,
+                    "reason": e.reason,
+                }
                 for _, e in store.neighbours(node.id)
             ],
             "context": ctx.used,
@@ -230,7 +239,12 @@ def create_app(
             raise HTTPException(409, "Chat about this concept first.")
         turns = [Turn(m.role, m.content) for m in history]
         proposals = guard(
-            propose_update, store, llm, subject, node.id, turns,
+            propose_update,
+            store,
+            llm,
+            subject,
+            node.id,
+            turns,
             settings.max_proposals_per_update,
         )
         return [proposal_view(p) for p in proposals]

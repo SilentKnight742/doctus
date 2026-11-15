@@ -32,8 +32,8 @@ class ExtractedLink(BaseModel):
 class CoveredConcept(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     summary: str = Field(default="", max_length=400)
-    evidence: list[str] = []   # 1-2 quotes; extras are ignored
-    link: ExtractedLink   # link to the current node (required: no floating nodes)
+    evidence: list[str] = []  # 1-2 quotes; extras are ignored
+    link: ExtractedLink  # link to the current node (required: no floating nodes)
 
 
 class FrontierConcept(BaseModel):
@@ -44,7 +44,7 @@ class FrontierConcept(BaseModel):
 
 
 class Extraction(BaseModel):
-    current_node_evidence: list[str] = []   # 1-2 quotes; extras are ignored
+    current_node_evidence: list[str] = []  # 1-2 quotes; extras are ignored
     covered: list[CoveredConcept] = []
     frontier: list[FrontierConcept] = []
 

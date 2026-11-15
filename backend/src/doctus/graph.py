@@ -43,7 +43,8 @@ def _filter(
     pending_nodes = {name_key(p.payload["name"]) for p in pending if p.kind == "node"}
     pending_edges = {
         (name_key(p.payload["prerequisite"]), name_key(p.payload["concept"]))
-        for p in pending if p.kind == "edge"
+        for p in pending
+        if p.kind == "edge"
     }
     existing_edges = {
         (name_key(a.name), name_key(b.name))
@@ -69,14 +70,16 @@ def _filter(
         if (a, b) in existing_edges or (a, b) in pending_edges:
             continue
         pending_edges.add((a, b))
-        items.append((
-            "edge",
-            {
-                "prerequisite": known.get(a, link.prerequisite.strip()),
-                "concept": known.get(b, link.concept.strip()),
-                "reason": link.reason.strip(),
-            },
-        ))
+        items.append(
+            (
+                "edge",
+                {
+                    "prerequisite": known.get(a, link.prerequisite.strip()),
+                    "concept": known.get(b, link.concept.strip()),
+                    "reason": link.reason.strip(),
+                },
+            )
+        )
 
     if max_items is not None:
         items = items[:max_items]
@@ -94,13 +97,18 @@ def propose_update(
     store: Store, llm: LLM, subject: dict, node_id: int, turns: list[Turn], max_items: int
 ) -> list[Proposal]:
     nodes = store.list_nodes(subject["id"])
-    current_map = "\n".join(
-        f"- {n.name}" + (
-            " (needs: " + ", ".join(p.name for p in store.prerequisites(n.id)) + ")"
-            if store.prerequisites(n.id) else ""
+    current_map = (
+        "\n".join(
+            f"- {n.name}"
+            + (
+                " (needs: " + ", ".join(p.name for p in store.prerequisites(n.id)) + ")"
+                if store.prerequisites(n.id)
+                else ""
+            )
+            for n in nodes
         )
-        for n in nodes
-    ) or "(empty)"
+        or "(empty)"
+    )
     focus = next((n.name for n in nodes if n.id == node_id), "?")
     conversation = "\n".join(f"{t.role}: {t.content}" for t in turns)
     prompt = (

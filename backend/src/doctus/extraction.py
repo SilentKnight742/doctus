@@ -17,7 +17,7 @@ code below decides what actually changes:
 from dataclasses import dataclass, field
 
 from .llm import LLM
-from .prompts import EXTRACT_SYSTEM, Extraction, ExtractedLink
+from .prompts import EXTRACT_SYSTEM, ExtractedLink, Extraction
 from .store import Conflict, Message, Node, Store, name_key
 
 FRONTIER_CAP = 3
@@ -48,10 +48,10 @@ def find_quote(quote: str, messages: list[Message]) -> Message | None:
 
 @dataclass
 class ExtractionSummary:
-    added: list[dict] = field(default_factory=list)       # {name, status}
+    added: list[dict] = field(default_factory=list)  # {name, status}
     promoted: list[str] = field(default_factory=list)
-    dropped: list[dict] = field(default_factory=list)     # {name, reason, quotes}
-    skipped: list[dict] = field(default_factory=list)     # {item, reason}
+    dropped: list[dict] = field(default_factory=list)  # {name, reason, quotes}
+    skipped: list[dict] = field(default_factory=list)  # {item, reason}
     edges_added: list[dict] = field(default_factory=list)
     evidence_verified: int = 0
     evidence_dropped: int = 0
@@ -70,6 +70,7 @@ class ExtractionSummary:
 
 # ---------- which messages go to the model ----------
 
+
 def pending_user_messages(store: Store, node: Node) -> int:
     msgs = store.node_messages(node.id, after_id=node.last_extracted_message_id)
     return sum(1 for m in msgs if m.role == "user")
@@ -86,10 +87,15 @@ def extraction_window(store: Store, node: Node) -> tuple[list[Message], list[Mes
 
 # ---------- the model call ----------
 
-def build_prompt(store: Store, subject: dict, node: Node,
-                 context: list[Message], new: list[Message]) -> str:
-    names = [n.name for n in store.list_nodes(subject["id"])
-             if n.status != "dismissed" and n.id != node.id]
+
+def build_prompt(
+    store: Store, subject: dict, node: Node, context: list[Message], new: list[Message]
+) -> str:
+    names = [
+        n.name
+        for n in store.list_nodes(subject["id"])
+        if n.status != "dismissed" and n.id != node.id
+    ]
     lines = [
         f"Subject: {subject['title']}",
         f"Learner's goal: {subject['goal'] or 'not stated'}",
@@ -115,12 +121,18 @@ def run_extraction(store: Store, llm: LLM, subject: dict, node: Node) -> dict | 
     result = llm.structured(EXTRACT_SYSTEM, prompt, Extraction)
     summary = apply_extraction(store, subject, node, result, context + new)
     store.set_last_extracted(node.id, new[-1].id)
-    store.log_extraction(subject["id"], node.id, summary.evidence_verified,
-                         summary.evidence_dropped, summary.as_dict())
+    store.log_extraction(
+        subject["id"],
+        node.id,
+        summary.evidence_verified,
+        summary.evidence_dropped,
+        summary.as_dict(),
+    )
     return summary.as_dict()
 
 
 # ---------- applying the result (deterministic) ----------
+
 
 def _verify(quotes: list[str], messages: list[Message], summary: ExtractionSummary):
     """Split quotes into verified (quote, message) pairs and failures."""
@@ -136,8 +148,14 @@ def _verify(quotes: list[str], messages: list[Message], summary: ExtractionSumma
     return good, bad
 
 
-def _link(store: Store, subject_id: int, concept: Node, anchor: Node,
-          link: ExtractedLink | None, summary: ExtractionSummary):
+def _link(
+    store: Store,
+    subject_id: int,
+    concept: Node,
+    anchor: Node,
+    link: ExtractedLink | None,
+    summary: ExtractionSummary,
+):
     if link is None:
         return
     label = f"{concept.name} <-> {anchor.name} ({link.kind})"
@@ -156,22 +174,32 @@ def _link(store: Store, subject_id: int, concept: Node, anchor: Node,
         reason = "cycle" if "cycle" in str(exc) else "duplicate"
         summary.skipped.append({"item": label, "reason": reason})
         return
-    summary.edges_added.append({
-        "from": first.name, "to": second.name, "kind": link.kind, "reason": link.reason,
-    })
+    summary.edges_added.append(
+        {
+            "from": first.name,
+            "to": second.name,
+            "kind": link.kind,
+            "reason": link.reason,
+        }
+    )
 
 
-def apply_extraction(store: Store, subject: dict, node: Node, result: Extraction,
-                     messages: list[Message]) -> ExtractionSummary:
+def apply_extraction(
+    store: Store, subject: dict, node: Node, result: Extraction, messages: list[Message]
+) -> ExtractionSummary:
     summary = ExtractionSummary()
     sid = subject["id"]
     with store.atomic():
         # The current node itself.
         good, bad = _verify(result.current_node_evidence, messages, summary)
         if bad and not good:
-            summary.dropped.append({
-                "name": node.name, "reason": "evidence not found in chat", "quotes": bad,
-            })
+            summary.dropped.append(
+                {
+                    "name": node.name,
+                    "reason": "evidence not found in chat",
+                    "quotes": bad,
+                }
+            )
         if good:
             if node.status != "covered":
                 store.mark_covered(node.id)
@@ -185,11 +213,15 @@ def apply_extraction(store: Store, subject: dict, node: Node, result: Extraction
                 continue  # handled above via current_node_evidence
             good, bad = _verify(c.evidence, messages, summary)
             if not good:
-                summary.dropped.append({
-                    "name": c.name,
-                    "reason": "no evidence given" if not c.evidence else "evidence not found in chat",
-                    "quotes": bad,
-                })
+                summary.dropped.append(
+                    {
+                        "name": c.name,
+                        "reason": "no evidence given"
+                        if not c.evidence
+                        else "evidence not found in chat",
+                        "quotes": bad,
+                    }
+                )
                 continue
             existing = store.find_node_by_name(sid, c.name)
             if existing is None:
@@ -214,7 +246,9 @@ def apply_extraction(store: Store, subject: dict, node: Node, result: Extraction
             if anchor is None or anchor.status == "dismissed":
                 anchor = node
             if per_anchor.get(anchor.id, 0) >= FRONTIER_CAP:
-                summary.skipped.append({"item": f.name, "reason": f"frontier cap for {anchor.name}"})
+                summary.skipped.append(
+                    {"item": f.name, "reason": f"frontier cap for {anchor.name}"}
+                )
                 continue
             per_anchor[anchor.id] = per_anchor.get(anchor.id, 0) + 1
             target = store.insert_node(sid, f.name, f.summary, status="frontier")

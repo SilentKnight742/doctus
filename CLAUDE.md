@@ -1,110 +1,223 @@
 # Doctus: project context for Claude Code
 
-Doctus is a learning companion that grows a concept graph **from what the learner actually covers in conversation**. Planning happens in claude.ai; building happens here.
+Doctus is a learning companion: you chat with a tutor like any good AI
+assistant, and a concept graph of what you covered grows alongside the chat.
+Planning happens in claude.ai; building happens here. This is a
+user-experience-first project: build, try it, improve. Prefer a working,
+pleasant slice over more planning.
 
-## Vision (agreed 2026-11-13)
+## Vision
+- **Exploration graph, not a roadmap** (think of the Wikipedia game). It records
+  only where the learner actually went. There are no suggestion or frontier
+  nodes (decided 2026-11-15).
+- **Flat graph.** One kind of node and typed edges, nothing nested, no sub-nodes.
+  Any hierarchy is a *view* computed from edges, never a storage structure.
+- **Origin**: a subject starts with a chat; its first node is where learning
+  began.
+- **Nodes** are concepts *taught in the chat*. Every node except the origin needs
+  at least one verbatim evidence quote, checked in code; without one, it is not
+  created. A node means taught, not learned; "learned" will come later from tests
+  and mastery.
+- **Edges** (directed, typed):
+  - `prerequisite`: A must be understood before B.
+  - `part_of`: A is a part of B (for example, a region is part of "starter
+    Pokemon"). A node has at most one `part_of` parent.
+  - `related`: adjacent, no direction meaning.
+  - No cycles in `prerequisite` or in `part_of`.
+- The **trail** (visit order) is separate and never mixed with edges.
+- **Semantic zoom (UI only).** Zoomed out, nodes collapse into their `part_of`
+  ancestors so you see high-level topics; zooming in expands them into detail.
+  Computed from `part_of` edges at render time.
+- **Mastery rule is NOT decided.** Keep `PlaceholderDecayModel` behind the
+  `MasteryModel` interface; build nothing that depends on its formula.
+- Gamification (later) rewards verified recall, not time or message counts.
 
-Doctus is an **exploration graph, not a roadmap**. Think of the Wikipedia game: the graph records where the learner actually went, plus faded suggestions of where they could go next.
+## Two AI layers
+Every learner message touches two separate layers with separate prompts:
+1. **Tutor**: talks with the learner. It never mentions the graph, nodes or
+   extraction, and it is never told to create graph material.
+2. **Cartographer**: reads the latest exchange after the tutor replies and
+   updates the graph (nodes and typed edges) using the existing extraction and
+   evidence rules. The graph should come naturally from ordinary
+   conversation, not from forcing a question-and-answer format.
 
-- **Origin.** A new subject starts with a chat. Its first node (the origin) is where learning began. 
+## Status (2026-11-15)
+- Backend done: store, LLM layer (Gemini + FakeLLM), exploration graph
+  (covered/frontier/evidence/trail/dismiss), extraction, origin chat that
+  answers the whole question at once. 64 offline tests pass.
+- M0 (`chore/repo-hygiene`, PR open): history rewritten to the noreply
+  identity and force-pushed once (done; no more force-pushes). Backend moved
+  to `backend/` (uv + lockfile, ruff, `make dev|test|lint|fmt`); CI runs
+  backend lint and tests on Python 3.11; README rewritten for the current
+  design; pilots saved in `docs/eval/`.
+- Local dev: `backend/.env` and `backend/doctus.db` (both git-ignored).
+  `make test` uses `uv run python -m pytest` in `backend/.venv`, which avoids
+  Kali's system pytest.
+- Pilots: starter map on German about 80-89% link precision; extraction live
+  runs on German (5 covered, 8 quotes verified, 0 dropped) and "starter Pokemon
+  of all regions" (9 covered, 11 verified, 0 dropped). Narrative subjects (a TV
+  episode) produce plot/cause links, not learning dependencies: a known limit.
+- No frontend yet. Next: M1 after M0 is merged.
 
-- **Covered nodes.** Concepts the learner actually learned in a dialogue. Each one carries evidence: a verbatim quote from the chat, checked in code. Covered nodes are added automatically because they are grounded. 
+## Git workflow (same as Videre)
+- Never commit or push directly to `main`. One branch per milestone
+  (`chore/...`, `feat/...`, `fix/...`), Conventional Commits
+  (`feat(ui): ...`, `fix(graph): ...`).
+- Run lint and tests before opening a PR. Open the PR with `gh pr create`,
+  then **STOP**: never merge it. Apoorv reviews and merges. Do not start the next
+  milestone until he says `main` has been updated (`git pull` first).
+- Never force-push and never use `--no-verify`, except the single exception
+  in M0 step 1.
+- Push over **HTTPS** with Apoorv's saved GitHub login, never SSH. The remote
+  must be `https://github.com/SilentKnight742/doctus.git`. Do not accept SSH
+  host keys or create SSH keys.
+- Commit identity: `Apoorv Chitnis <77118742+SilentKnight742@users.noreply.github.com>`
+  (the same as Videre). Set it in this repo's local git config.
 
-- **Frontier nodes.** Adjacent or prerequisite concepts the dialogue touched on but did not explore. Shown faded, as suggestions. The learner can open one (starting its own topic chat) or dismiss it. 
+## Milestones
 
-- **Recursion.** Opening a frontier node starts its topic chat; once learned there it becomes covered and gains its own frontier. Further from the origin, overlap with the starting point decreases. 
+### M0 `chore/repo-hygiene`
+1. **One-time history fix (needs Apoorv's explicit OK before running).** All
+   existing commits have the author email `you@example.com`. Rewrite every
+   commit's author and committer to the identity above, verify with
+   `git log --format='%an <%ae>'`, then force-push `main` once with
+   `--force-with-lease`. Do this before creating any branch. This is the only
+   permitted force-push.
+2. Restructure like Videre: move the Python package to `backend/` (its own
+   `pyproject.toml`, `src/`, `tests/`, `.env.example`), and leave room for
+   `frontend/`. Add a root `Makefile` (`make dev`, `make test`, `make lint`)
+   and set up `ruff` (check and format) for the backend.
+3. Add `.github/workflows/ci.yml` running backend lint and tests on push to
+   `main` and on PRs (Python 3.11 or later; skip live tests). The frontend job
+   is added in M2.
+4. Rewrite `README.md` for the design in this file's Vision (flat graph,
+   evidence check, typed edges, semantic zoom, the two AI layers): what it is,
+   how to run it, current limits, and a short "implemented vs in progress" list.
+   No marketing language. M1 and M2 each update the README for what they change.
+5. Save the pilot results to `docs/eval/` (starter-map pilot, the German
+   extraction reruns, the Pokemon run), with numbers taken from the commit
+   messages and any saved raw output. Mark them as a small pilot, not a
+   benchmark.
+6. Update this file's Status section. Open the PR and stop.
 
-- **Edge kinds.** `prerequisite` (A must be understood before B) and `related` (adjacent). Separately, the **trail** records the order the learner visited nodes. Never mix trail steps with graph edges. 
+### M1 `feat/tutor-and-cartographer`
+1. Split the layers: `tutor` (prompt plus chat call) and `cartographer` (the
+   existing extraction, triggered differently). Separate prompt constants and an
+   optional separate model setting (`DOCTUS_GRAPH_MODEL`, defaulting to the chat
+   model).
+2. **The cartographer runs after every exchange**, replacing the
+   every-3rd-message rule, in the background (FastAPI `BackgroundTasks`), so
+   the tutor's reply is never delayed. If it fails (for example a 429), leave
+   `last_extracted_message_id` where it is so the next exchange catches up; never
+   loop retries. Expose its state so the UI can poll: a per-subject
+   `graph_version` (incremented on every change) plus
+   `cartographer: idle | running | error`.
+3. **Rewrite the tutor prompt** (see "Tutor behaviour" below). Remove anything
+   that makes it drip-feed one or two lines and then quiz. Keep the rule that the
+   origin chat's first reply answers the whole question.
+4. Context the tutor receives stays quiet background: the current topic, its
+   prerequisites, its `part_of` parent and children, and nearby concepts. The
+   tutor must never narrate it.
+5. **Remove frontier entirely.** Drop the node `status` column and the
+   `dismissed` state, the `/dismiss` endpoint, frontier output from the
+   cartographer schema and prompt, and the frontier tests. Every node except the
+   origin must have verified evidence or it is not created. Delete any existing
+   frontier nodes in local databases (dev data only; no migration needed).
+6. **Edge kinds** become `prerequisite`, `part_of` and `related`. Enforce at
+   most one `part_of` parent per node (keep the first, skip and count later
+   ones) and no cycles in `prerequisite` or `part_of`. Teach the cartographer
+   when to use `part_of` (an overview's items are parts of the whole) and keep
+   the rule that every prerequisite reason must match the arrow.
+7. **Storage for traversal.** The graph stays an adjacency list (nodes table plus
+   edges table). Add indexes on edges `(from_id)`, `(to_id)` and `(kind)`.
+   Provide store helpers that use recursive SQL CTEs or BFS: `ancestors` and
+   `descendants` by edge kind, `path(a, b)` (shortest path over all edges,
+   ignoring direction), and `part_of_root(node)`.
+8. Tests with FakeLLM: tutor and cartographer calls are separate; a cartographer
+   failure does not break chat; catch-up after a failure; `graph_version`
+   increments; no node without evidence; single `part_of` parent enforced; cycle
+   checks per kind; traversal helpers. Then one live 6-message German chat; show
+   Apoorv the replies and the resulting graph. Open the PR and stop.
 
-- **Chat and graph.** Topic chats read context from the graph; the graph grows from topic chats. 
+### M2 `feat/ui`
+React + TypeScript + Vite in `frontend/`, with React Flow for the graph.
+- **Two screens**, switchable at any time, plus a subject list or picker
+  (a home view or a slim left rail):
+  1. **Chat screen**: a full chat for the current node. A small live mini graph
+     sits in the top-right corner, highlights the current node and updates as
+     the graph grows. Clicking the mini graph opens the graph screen.
+  2. **Graph screen**: the full graph. Selecting a node opens its chat as a
+     floating window in the bottom-right, like Gmail's compose window, with
+     minimise, close and "expand to chat screen" controls. One window at a time
+     for now; selecting another node switches the window to that node.
+- **Chat** should feel like a normal AI chat app (in both the full screen and
+  the window): markdown rendering (headings, lists, tables, code), Enter to
+  send, Shift+Enter for a newline, a pending indicator, and errors shown clearly
+  (429 means "rate limited, try again in a minute").
+- **Graph**:
+  - Every node looks the same apart from the highlighted origin and the current
+    node. There are no frontier, suggestion or dismissed states.
+  - Edge styles: `prerequisite` solid with an arrow, `part_of` a thin connector
+    drawn toward the parent, `related` dashed with no arrow.
+  - **Semantic zoom**: zoomed out, nodes collapse into their `part_of` ancestors
+    (shown as a single node with a child count), and zooming in expands them.
+    Use two or three discrete zoom thresholds and compute it at render time.
+    Edges between collapsed nodes are merged.
+  - The layout keeps `part_of` children near their parent and the origin
+    central. New nodes briefly highlight when they appear.
+  - Opening a node's chat records the trail with `from_node_id`.
+  - The node detail (in the chat window header or a side drawer) shows the
+    summary, the evidence quotes and the edges.
+- A breadcrumb on the chat screen shows the trail.
+- After each message, poll the graph status until the cartographer is idle,
+  then refresh.
+- A "context used" toggle on assistant messages, off by default (a
+  development aid).
+- Light and dark themes. The look should be calm and readable rather than a
+  generic template; it is a showcase.
+- The visitor token is kept in `localStorage`, with a fallback when that is
+  unavailable. The Vite dev server proxies `/api`. `make dev` starts the
+  backend and frontend together.
+- Add the frontend CI job (lint, typecheck, test, build), a few Vitest tests
+  (API client, layout), and a Playwright screenshot of a real session for the
+  README.
+- Open the PR and stop.
 
-- **Gamification** rewards verified recall, not time spent or messages sent. 
+## Tutor behaviour (prompt guidance)
+Write the tutor like a strong general assistant (Claude- or GPT-like) that
+happens to be an excellent teacher:
+- Answer what was asked, fully and well structured: explanation, examples, a
+  table or code where it helps. Length matches the question; no one-liners
+  followed by a quiz.
+- Do not end every reply with a question. Check understanding only when it is
+  natural or when the learner asks to be tested.
+- It has a personality: warm, curious, a little wit, and opinions when asked.
+  Plain language, no filler, no sycophancy. It follows the learner's lead,
+  including tangents, and can suggest where to go next without forcing it.
+- It uses the background context only to tailor depth (for example, briefly
+  recapping a prerequisite the learner hasn't covered yet), never by mentioning
+  graphs, nodes, levels or "context".
+- It corrects mistakes clearly and kindly, and says when it is unsure.
 
-- **Mastery rule is NOT decided.** `PlaceholderDecayModel` is temporary; always go through the `MasteryModel` interface. 
-
-## Status
-
-- **Done:** backend v0.1 (store, visitor scoping, cycle checks, LLM layer with Gemini + FakeLLM, topic chat with `context_used`, swappable mastery), `.env` setup, live Gemini test, starter-map pilot (German about 80-89% link precision; narrative subjects such as a TV episode produce cause/plot links, not learning dependencies: a known limit). 
-
-- **If the v0.1 code is not pushed yet, push it before starting the redesign.** 
-
-- **Next: Task 1 below** (backend redesign). Then the frontend, then tests and revision. 
-
-## Task 1: exploration-graph backend
-
-Implement on the existing code. Keep the store, LLM layer, context builder and mastery module. The starter-map `skeleton` endpoint and the `proposals` table stay in the code but leave the main flow (later: optional "show me the territory" view).
-
-### Data model
-
-- `nodes`: add `status` (`covered` | `frontier` | `dismissed`), `covered_at`, and `last_extracted_message_id`. 
-
-- `subjects`: add `origin_node_id`. 
-
-- New `node_evidence` (node\_id, message\_id, quote). The quote must be a verbatim substring of that message (compare after normalising whitespace and case). Evidence that fails the check is dropped. 
-
-- `edges`: add `kind` (`prerequisite` | `related`). The cycle check applies only to `prerequisite` edges. Store edges as (from, to, kind, reason). 
-
-- New `trail` (subject\_id, node\_id, from\_node\_id nullable, at). Record a step when the learner sends the first message in a node's chat in a session, with `from_node_id` supplied by the client. 
-
-### Flows
-
-1. **New subject.** `POST /api/subjects {title, goal}` creates the subject and an origin node named after the title, with status `frontier` until covered. The learner's first chat happens in the origin node's topic chat. 
-
-2. **Extraction trigger.** After every 3rd learner message in a topic chat since that node's last extraction, run extraction automatically. Also expose `POST /api/nodes/{id}/extract`. Only messages after `last_extracted_message_id` are sent (plus the 2 messages before them for context). Free-tier limits are low: one extraction call per trigger, no retries beyond the existing one-retry-on-invalid-JSON. 
-
-3. **Extraction output** (Pydantic schema, validated): 
-
-   - `covered`: concepts the dialogue actually taught; each has name, summary, 1-2 `evidence` quotes copied verbatim from the conversation, and its link to the current node (`kind`, direction, reason). 
-
-   - `frontier`: concepts mentioned or clearly needed but not explored; each has name, summary, the node it attaches to, `kind`, direction and reason. 
-
-   - Prompt rules: one node per teachable idea; reuse existing names when they mean the same thing; for every prerequisite edge the reason must explain why the prerequisite must come first, and the arrow must match the reason (the pilot found a case where the reason contradicted the arrow). 
-
-4. **Applying extraction** (deterministic code, unit-tested): 
-
-   - Covered concept with at least one verified quote: create it as `covered`, or promote an existing `frontier` node to `covered`. Without a verified quote: drop it and count the drop. 
-
-   - If the current node's own concept is evidenced, mark it `covered`. 
-
-   - Frontier: at most 3 new frontier nodes per attach point per extraction; skip names that already exist (any status, including `dismissed`, so dismissed suggestions never come back). 
-
-   - Edges: skip duplicates, self-links, and prerequisite cycles. 
-
-   - Return a summary: added, promoted, dropped (with reason), skipped. 
-
-5. **Dismiss.** `POST /api/nodes/{id}/dismiss` sets a frontier node to `dismissed` (not allowed for covered nodes or the origin). 
-
-6. **Graph API.** `GET /api/subjects/{id}/graph` returns nodes (status, strength, level, distance from origin computed by BFS over edges ignoring direction), edges with kind, the trail, and extraction stats (covered nodes, evidence verified vs dropped). 
-
-7. **Topic chat context.** Add covered neighbours and the names of the node's frontier suggestions to the context builder, and keep `context_used` in sync. 
-
-### Tests (FakeLLM only)
-
-Evidence verification (exact, whitespace or case differences, fabricated quote); frontier promoted to covered; frontier cap of 3; dismissed names not re-suggested; extraction triggers on the 3rd message and not before; `last_extracted_message_id` advances; cycle check applies to prerequisite edges only; distance from origin; trail records `from_node_id`; another visitor cannot extract, dismiss or read.
-
-### Done when
-
-All tests pass with `python -m pytest`; one live run (`-m live` or curl) shows a real chat of 6 messages producing grounded covered nodes and a few frontier nodes. Show Apoorv the result, including any dropped evidence, before committing. Push only when he says so.
-
-## Later (not now)
-
-Frontend (React + Vite, React Flow, layout outward from the origin); tests and revision; optional starter-map view; narrative subjects; deployment.
+## Ideas parked for later (do not build now)
+- Learner feedback raised GraphQL; REST is fine for a single client, so revisit
+  only if the API grows.
+- Ideas from Claude's memory architecture for long-term, per-subject context
+  management.
+- Tests and revision, the mastery rule, gamification, the optional starter-map
+  ("show me the territory") view, narrative subjects, import from other
+  platforms, deployment.
 
 ## Conventions
-
-- Gemini model: `gemini-3.5-flash-lite` (free tier; confirmed working). Override with `DOCTUS_GEMINI_MODEL`. 
-
-- Run tests as `python -m pytest` with the venv active (`pytest` alone picks up Kali's system pytest). Never "fix" that by changing code or deleting tests. 
-
-- Default tests use `FakeLLM` and never call a real API; only `-m live` tests do. 
-
-- Secrets live only in `.env` (git-ignored); `.env.example` documents them. Never print the key or ask for it in chat. 
-
-- All model calls go through `doctus.llm.LLM`; structured output is validated with Pydantic and retried once. 
-
-- Offline dev: `DOCTUS_LLM=fake uvicorn doctus.main:app --reload`. 
-
-- Git: push over **HTTPS** using Apoorv's saved GitHub login, never SSH. The remote must be `https://github.com/SilentKnight742/doctus.git`; if `git remote -v` shows an SSH URL, fix it with `git remote set-url origin` to that address. Do not accept SSH host keys or create SSH keys. Push only when Apoorv says so. 
-
-- Time-boxed: cut scope rather than extend. Ask Apoorv before adding anything not listed here. 
-
+- Gemini model: `gemini-3.5-flash-lite` (free tier; confirmed working).
+  Override with `DOCTUS_GEMINI_MODEL`.
+- Run tests as `python -m pytest` with the venv active (`pytest` alone picks up
+  Kali's system pytest). Never "fix" that by changing code or deleting tests.
+- Default tests use `FakeLLM`; only `-m live` tests call Gemini. Space out live
+  calls (free tier).
+- Secrets live only in `.env` (git-ignored); `.env.example` documents them.
+  Never print the key or ask for it in chat.
+- All model calls go through `doctus.llm.LLM`; structured output is validated
+  with Pydantic and retried once.
+- Time-boxed: cut scope rather than extend. Ask Apoorv before adding anything
+  not listed here.

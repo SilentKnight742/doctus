@@ -15,10 +15,13 @@ from doctus.store import Conflict, Store
 V1 = {"X-Doctus-Visitor": "visitor-one-0000000"}
 V2 = {"X-Doctus-Visitor": "visitor-two-0000000"}
 
-TUTOR_LINE = "With Wechselpräpositionen, use the dative when nothing moves: Das Buch liegt auf dem Tisch."
+TUTOR_LINE = (
+    "With Wechselpräpositionen, use the dative when nothing moves: Das Buch liegt auf dem Tisch."
+)
 
 
 # ---------- fixtures ----------
+
 
 @pytest.fixture
 def store():
@@ -32,8 +35,12 @@ def env():
     llm = FakeLLM()
     store = Store(":memory:")
     settings = Settings(
-        db_path=":memory:", llm_provider="fake", gemini_api_key=None,
-        gemini_model="x", max_proposals_per_update=5, recent_turns_in_context=8,
+        db_path=":memory:",
+        llm_provider="fake",
+        gemini_api_key=None,
+        gemini_model="x",
+        max_proposals_per_update=5,
+        recent_turns_in_context=8,
     )
     app = create_app(store=store, llm=llm, mastery=PlaceholderDecayModel(), settings=settings)
     return TestClient(app), llm, store
@@ -62,6 +69,7 @@ def _link(kind="related", direction="before", reason="r"):
 
 # ---------- evidence verification ----------
 
+
 def test_quote_found_exactly():
     s = Store(":memory:")
     subj, origin = _subject(s)
@@ -80,8 +88,12 @@ def test_quote_matches_despite_whitespace_and_case():
 def test_quote_matches_despite_markdown_emphasis():
     s = Store(":memory:")
     subj, origin = _subject(s)
-    m = s.add_message(subj["id"], origin.id, "assistant",
-                      "It answers ***Wohin?*** so we need the **Accusative** case, e.g. `ins` Kino.")
+    m = s.add_message(
+        subj["id"],
+        origin.id,
+        "assistant",
+        "It answers ***Wohin?*** so we need the **Accusative** case, e.g. `ins` Kino.",
+    )
     assert find_quote("It answers Wohin? so we need the Accusative case, e.g. ins Kino.", [m]) is m
     # a changed word still fails
     assert find_quote("It answers Wo? so we need the Accusative case", [m]) is None
@@ -89,6 +101,7 @@ def test_quote_matches_despite_markdown_emphasis():
 
 def test_covered_concept_without_link_is_invalid():
     from pydantic import ValidationError
+
     with pytest.raises(ValidationError):
         Extraction.model_validate({"covered": [{"name": "X", "evidence": ["q"]}]})
 
@@ -96,10 +109,19 @@ def test_covered_concept_without_link_is_invalid():
 def test_covered_concept_is_always_linked_to_current_node(store):
     s, origin = _subject(store)
     msgs = _chat(store, s, origin, ("q", "Two-way prepositions take accusative or dative."))
-    _apply(store, s, origin, msgs, covered=[
-        {"name": "Two-way prepositions", "evidence": ["take accusative or dative"],
-         "link": _link("related")},
-    ])
+    _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        covered=[
+            {
+                "name": "Two-way prepositions",
+                "evidence": ["take accusative or dative"],
+                "link": _link("related"),
+            },
+        ],
+    )
     node = store.find_node_by_name(s["id"], "Two-way prepositions")
     assert distances_from(origin.id, store.list_edges(s["id"]))[node.id] == 1
 
@@ -107,11 +129,21 @@ def test_covered_concept_is_always_linked_to_current_node(store):
 def test_fabricated_quote_is_dropped_and_counted(store):
     s, origin = _subject(store)
     msgs = _chat(store, s, origin, ("When do I use dative?", TUTOR_LINE))
-    summary = _apply(store, s, origin, msgs, covered=[
-        {"name": "Dativ for position", "summary": "x",
-         "evidence": ["the dative marks static location in all cases"], "link": _link()},
-        {"name": "No quotes at all", "summary": "x", "evidence": [], "link": _link()},
-    ])
+    summary = _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        covered=[
+            {
+                "name": "Dativ for position",
+                "summary": "x",
+                "evidence": ["the dative marks static location in all cases"],
+                "link": _link(),
+            },
+            {"name": "No quotes at all", "summary": "x", "evidence": [], "link": _link()},
+        ],
+    )
     assert store.find_node_by_name(s["id"], "Dativ for position") is None
     assert [d["name"] for d in summary.dropped] == ["Dativ for position", "No quotes at all"]
     assert summary.dropped[0]["reason"] == "evidence not found in chat"
@@ -122,11 +154,20 @@ def test_fabricated_quote_is_dropped_and_counted(store):
 def test_one_good_quote_is_enough_and_is_stored(store):
     s, origin = _subject(store)
     msgs = _chat(store, s, origin, ("When do I use dative?", TUTOR_LINE))
-    summary = _apply(store, s, origin, msgs, covered=[
-        {"name": "Dativ for position", "summary": "Static location takes dative.",
-         "evidence": ["made up", "Das Buch liegt auf dem Tisch."],
-         "link": _link("prerequisite", "after", "position builds on the origin topic")},
-    ])
+    summary = _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        covered=[
+            {
+                "name": "Dativ for position",
+                "summary": "Static location takes dative.",
+                "evidence": ["made up", "Das Buch liegt auf dem Tisch."],
+                "link": _link("prerequisite", "after", "position builds on the origin topic"),
+            },
+        ],
+    )
     node = store.find_node_by_name(s["id"], "Dativ for position")
     assert node.status == "covered" and node.covered_at is not None
     ev = store.list_evidence(node.id)
@@ -148,13 +189,29 @@ def test_current_node_evidenced_becomes_covered(store):
 
 # ---------- frontier ----------
 
+
 def test_frontier_promoted_to_covered(store):
     s, origin = _subject(store)
     store.insert_node(s["id"], "Akkusativ", "Case for direct objects.", status="frontier")
-    msgs = _chat(store, s, origin, ("And Akkusativ?", "Akkusativ answers wohin: Ich lege das Buch auf den Tisch."))
-    summary = _apply(store, s, origin, msgs, covered=[
-        {"name": "akkusativ", "evidence": ["Ich lege das Buch auf den Tisch."], "link": _link()},
-    ])
+    msgs = _chat(
+        store,
+        s,
+        origin,
+        ("And Akkusativ?", "Akkusativ answers wohin: Ich lege das Buch auf den Tisch."),
+    )
+    summary = _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        covered=[
+            {
+                "name": "akkusativ",
+                "evidence": ["Ich lege das Buch auf den Tisch."],
+                "link": _link(),
+            },
+        ],
+    )
     node = store.find_node_by_name(s["id"], "Akkusativ")
     assert node.status == "covered"
     assert summary.promoted == ["Akkusativ"] and summary.added == []
@@ -163,10 +220,16 @@ def test_frontier_promoted_to_covered(store):
 def test_frontier_capped_at_three_per_attach_point(store):
     s, origin = _subject(store)
     msgs = _chat(store, s, origin, ("hi", "hello"))
-    summary = _apply(store, s, origin, msgs, frontier=[
-        {"name": f"Topic {i}", "attach_to": "German", "link": _link()} for i in range(5)
-    ])
-    frontier = [n.name for n in store.list_nodes(s["id"]) if n.status == "frontier" and n.id != origin.id]
+    summary = _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        frontier=[{"name": f"Topic {i}", "attach_to": "German", "link": _link()} for i in range(5)],
+    )
+    frontier = [
+        n.name for n in store.list_nodes(s["id"]) if n.status == "frontier" and n.id != origin.id
+    ]
     assert frontier == ["Topic 0", "Topic 1", "Topic 2"]
     assert [x["item"] for x in summary.skipped] == ["Topic 3", "Topic 4"]
 
@@ -174,9 +237,15 @@ def test_frontier_capped_at_three_per_attach_point(store):
 def test_frontier_unknown_attach_point_falls_back_to_current_node(store):
     s, origin = _subject(store)
     msgs = _chat(store, s, origin, ("hi", "hello"))
-    _apply(store, s, origin, msgs, frontier=[
-        {"name": "Contractions", "attach_to": "Not a node", "link": _link()},
-    ])
+    _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        frontier=[
+            {"name": "Contractions", "attach_to": "Not a node", "link": _link()},
+        ],
+    )
     (edge,) = store.list_edges(s["id"])
     assert origin.id in (edge.from_id, edge.to_id)
 
@@ -186,9 +255,15 @@ def test_dismissed_names_are_not_re_suggested(store):
     old = store.insert_node(s["id"], "Contractions", "", status="frontier")
     store.dismiss_node("v1", old.id)
     msgs = _chat(store, s, origin, ("hi", "hello"))
-    summary = _apply(store, s, origin, msgs, frontier=[
-        {"name": "contractions ", "attach_to": "German", "link": _link()},
-    ])
+    summary = _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        frontier=[
+            {"name": "contractions ", "attach_to": "German", "link": _link()},
+        ],
+    )
     assert store.node_by_id(old.id).status == "dismissed"
     assert summary.skipped == [{"item": "contractions ", "reason": "name exists"}]
     assert summary.added == []
@@ -205,8 +280,9 @@ def test_dismiss_rules(store):
 
 # ---------- edges ----------
 
+
 def test_cycle_check_applies_to_prerequisite_edges_only(store):
-    s, origin = _subject(store)
+    s, _origin = _subject(store)
     a = store.insert_node(s["id"], "A", "")
     b = store.insert_node(s["id"], "B", "")
     store.insert_edge(s["id"], a.id, b.id, "prerequisite", "")
@@ -225,25 +301,42 @@ def test_extraction_skips_duplicate_self_and_cyclic_edges(store):
     x = store.insert_node(s["id"], "X", "", status="covered")
     store.insert_edge(s["id"], origin.id, x.id, "prerequisite", "")
     msgs = _chat(store, s, origin, ("q", "X is taught here in full."))
-    summary = _apply(store, s, origin, msgs, covered=[
-        # X -> origin would close a cycle with origin -> X
-        {"name": "X", "evidence": ["X is taught here"], "link": _link("prerequisite", "before")},
-    ])
+    summary = _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        covered=[
+            # X -> origin would close a cycle with origin -> X
+            {
+                "name": "X",
+                "evidence": ["X is taught here"],
+                "link": _link("prerequisite", "before"),
+            },
+        ],
+    )
     assert summary.skipped == [{"item": "X -> German (prerequisite)", "reason": "cycle"}]
-    summary = _apply(store, s, origin, msgs, covered=[
-        {"name": "X", "evidence": ["X is taught here"], "link": _link("prerequisite", "after")},
-    ])
+    summary = _apply(
+        store,
+        s,
+        origin,
+        msgs,
+        covered=[
+            {"name": "X", "evidence": ["X is taught here"], "link": _link("prerequisite", "after")},
+        ],
+    )
     assert summary.skipped[0]["reason"] == "duplicate"
 
 
 # ---------- distance ----------
+
 
 def test_distance_from_origin_ignores_direction(store):
     s, origin = _subject(store)
     a = store.insert_node(s["id"], "A", "")
     b = store.insert_node(s["id"], "B", "")
     lone = store.insert_node(s["id"], "Lone", "")
-    store.insert_edge(s["id"], a.id, origin.id, "prerequisite", "")   # points at origin
+    store.insert_edge(s["id"], a.id, origin.id, "prerequisite", "")  # points at origin
     store.insert_edge(s["id"], a.id, b.id, "related", "")
     dist = distances_from(origin.id, store.list_edges(s["id"]))
     assert dist == {origin.id: 0, a.id: 1, b.id: 2}
@@ -252,9 +345,11 @@ def test_distance_from_origin_ignores_direction(store):
 
 # ---------- API: trigger, window, trail, visitors ----------
 
+
 def _new_subject(client):
-    subj = client.post("/api/subjects", json={"title": "German", "goal": "Wechselpräpositionen"},
-                       headers=V1).json()
+    subj = client.post(
+        "/api/subjects", json={"title": "German", "goal": "Wechselpräpositionen"}, headers=V1
+    ).json()
     return subj, subj["origin_node_id"]
 
 
@@ -270,14 +365,21 @@ def test_new_subject_has_frontier_origin(env):
     subj, origin_id = _new_subject(client)
     graph = client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()
     (node,) = graph["nodes"]
-    assert (node["id"], node["name"], node["status"], node["distance"]) == (origin_id, "German", "frontier", 0)
+    assert (node["id"], node["name"], node["status"], node["distance"]) == (
+        origin_id,
+        "German",
+        "frontier",
+        0,
+    )
 
 
 def test_extraction_triggers_on_third_message_not_before(env):
     client, llm, store = env
-    subj, node_id = _topic(client, store)
+    _subj, node_id = _topic(client, store)
     for i in range(2):
-        res = client.post(f"/api/nodes/{node_id}/chat", json={"message": f"m{i}"}, headers=V1).json()
+        res = client.post(
+            f"/api/nodes/{node_id}/chat", json={"message": f"m{i}"}, headers=V1
+        ).json()
         assert res["extraction"] is None
     assert not [c for c in llm.calls if c["kind"] == "json"]
 
@@ -293,7 +395,7 @@ def test_extraction_triggers_on_third_message_not_before(env):
 
 def test_last_extracted_message_advances_and_window_has_two_context_messages(env):
     client, llm, store = env
-    subj, node_id = _topic(client, store)
+    _subj, node_id = _topic(client, store)
     for i in range(3):
         client.post(f"/api/nodes/{node_id}/chat", json={"message": f"first-{i}"}, headers=V1)
     node = store.node_by_id(node_id)
@@ -309,12 +411,14 @@ def test_last_extracted_message_advances_and_window_has_two_context_messages(env
     assert convo[1].startswith("[context] assistant:")
     assert convo[2] == "user: second-0"
     assert "first-1" not in prompt
-    assert store.node_by_id(node_id).last_extracted_message_id == store.node_messages(node_id)[-1].id
+    assert (
+        store.node_by_id(node_id).last_extracted_message_id == store.node_messages(node_id)[-1].id
+    )
 
 
 def test_manual_extract_and_nothing_new(env):
-    client, llm, store = env
-    subj, node_id = _topic(client, store)
+    client, _llm, store = env
+    _subj, node_id = _topic(client, store)
     assert client.post(f"/api/nodes/{node_id}/extract", headers=V1).status_code == 409
     client.post(f"/api/nodes/{node_id}/chat", json={"message": "hello"}, headers=V1)
     res = client.post(f"/api/nodes/{node_id}/extract", headers=V1)
@@ -324,7 +428,7 @@ def test_manual_extract_and_nothing_new(env):
 
 def test_failed_extraction_keeps_chat_reply(env):
     client, llm, store = env
-    subj, node_id = _topic(client, store)
+    _subj, node_id = _topic(client, store)
     for i in range(2):
         client.post(f"/api/nodes/{node_id}/chat", json={"message": f"m{i}"}, headers=V1)
     llm.queue_json("garbage")
@@ -336,15 +440,18 @@ def test_failed_extraction_keeps_chat_reply(env):
 
 
 def test_origin_first_reply_builds_graph_immediately(env):
-    client, llm, store = env
-    subj, origin_id = _new_subject(client)
+    client, llm, _store = env
+    _subj, origin_id = _new_subject(client)
     llm.queue_json({"current_node_evidence": ["You said: overview please"]})
-    res = client.post(f"/api/nodes/{origin_id}/chat",
-                      json={"message": "overview please"}, headers=V1).json()
+    res = client.post(
+        f"/api/nodes/{origin_id}/chat", json={"message": "overview please"}, headers=V1
+    ).json()
     assert res["extraction"]["promoted"] == ["German"]
     # afterwards the origin follows the normal every-3rd-message rule
     for i in range(2):
-        res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": f"m{i}"}, headers=V1).json()
+        res = client.post(
+            f"/api/nodes/{origin_id}/chat", json={"message": f"m{i}"}, headers=V1
+        ).json()
         assert res["extraction"] is None
     res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": "m2"}, headers=V1).json()
     assert res["extraction"] is not None
@@ -353,25 +460,30 @@ def test_origin_first_reply_builds_graph_immediately(env):
 def test_tutor_gives_big_picture_in_origin_and_stays_focused_in_topics(env):
     client, llm, store = env
     subj, node_id = _topic(client, store)
-    client.post(f"/api/nodes/{subj['origin_node_id']}/chat", json={"message": "all of it"}, headers=V1)
+    client.post(
+        f"/api/nodes/{subj['origin_node_id']}/chat", json={"message": "all of it"}, headers=V1
+    )
     client.post(f"/api/nodes/{node_id}/chat", json={"message": "this one"}, headers=V1)
     origin_sys, topic_sys = [c["system"] for c in llm.calls if c["kind"] == "chat"]
     assert "starting point" in origin_sys and "Stay on it" not in origin_sys
     assert "Stay on it" in topic_sys and "starting point" not in topic_sys
-    assert "in full, in your first reply" in origin_sys and "in full, in your first reply" in topic_sys
+    assert (
+        "in full, in your first reply" in origin_sys and "in full, in your first reply" in topic_sys
+    )
 
 
 def test_from_node_id_equal_to_node_is_ignored(env):
-    client, llm, store = env
+    client, _llm, _store = env
     subj, origin_id = _new_subject(client)
-    client.post(f"/api/nodes/{origin_id}/chat",
-                json={"message": "a", "from_node_id": origin_id}, headers=V1)
+    client.post(
+        f"/api/nodes/{origin_id}/chat", json={"message": "a", "from_node_id": origin_id}, headers=V1
+    )
     trail = client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()["trail"]
     assert [(t["node_id"], t["from_node_id"]) for t in trail] == [(origin_id, None)]
 
 
 def test_nodes_are_flat_and_list_their_edges(env):
-    client, llm, store = env
+    client, _llm, store = env
     subj, origin_id = _new_subject(client)
     child = store.insert_node(subj["id"], "Dativ", "", status="frontier")
     grandchild = store.insert_node(subj["id"], "Dativ endings", "", status="frontier")
@@ -388,15 +500,20 @@ def test_nodes_are_flat_and_list_their_edges(env):
 
 
 def test_trail_records_from_node_id(env):
-    client, llm, store = env
+    client, _llm, store = env
     subj, origin_id = _new_subject(client)
     other = store.insert_node(subj["id"], "Dativ", "", status="frontier")
     client.post(f"/api/nodes/{origin_id}/chat", json={"message": "a"}, headers=V1)
-    client.post(f"/api/nodes/{origin_id}/chat", json={"message": "b"}, headers=V1)  # same node: no step
-    client.post(f"/api/nodes/{other.id}/chat", json={"message": "c", "from_node_id": origin_id}, headers=V1)
+    client.post(
+        f"/api/nodes/{origin_id}/chat", json={"message": "b"}, headers=V1
+    )  # same node: no step
+    client.post(
+        f"/api/nodes/{other.id}/chat", json={"message": "c", "from_node_id": origin_id}, headers=V1
+    )
     graph = client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()
     assert [(t["node_id"], t["from_node_id"]) for t in graph["trail"]] == [
-        (origin_id, None), (other.id, origin_id),
+        (origin_id, None),
+        (other.id, origin_id),
     ]
     # trail steps are never graph edges
     assert graph["edges"] == []
@@ -428,7 +545,7 @@ def test_topic_context_includes_covered_neighbours_and_frontier(env):
 
 
 def test_other_visitor_cannot_extract_dismiss_or_read(env):
-    client, llm, store = env
+    client, _llm, store = env
     subj, origin_id = _new_subject(client)
     fr = store.insert_node(subj["id"], "Contractions", "", status="frontier")
     client.post(f"/api/nodes/{origin_id}/chat", json={"message": "hello"}, headers=V1)
@@ -436,8 +553,12 @@ def test_other_visitor_cannot_extract_dismiss_or_read(env):
     assert client.post(f"/api/nodes/{fr.id}/dismiss", headers=V2).status_code == 404
     assert client.get(f"/api/nodes/{origin_id}", headers=V2).status_code == 404
     assert client.get(f"/api/subjects/{subj['id']}/graph", headers=V2).status_code == 404
-    assert client.post(f"/api/nodes/{origin_id}/chat",
-                       json={"message": "x", "from_node_id": fr.id}, headers=V2).status_code == 404
+    assert (
+        client.post(
+            f"/api/nodes/{origin_id}/chat", json={"message": "x", "from_node_id": fr.id}, headers=V2
+        ).status_code
+        == 404
+    )
     assert store.node_by_id(fr.id).status == "frontier"
     # and the owner can
     assert client.post(f"/api/nodes/{fr.id}/dismiss", headers=V1).json()["status"] == "dismissed"
