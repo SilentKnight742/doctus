@@ -111,8 +111,8 @@ def test_topic_chat_uses_prerequisites_as_context(env):
 
     assert res["reply"].startswith("Attention mixes")
     assert [p["name"] for p in res["context_used"]["prerequisites"]] == ["Dot product"]
-    system_prompt = llm.calls[-1]["system"]
-    assert "Current concept: Attention" in system_prompt
+    system_prompt = [c for c in llm.calls if c["kind"] == "chat"][-1]["system"]
+    assert "Current topic: Attention" in system_prompt
     assert "Dot product" in system_prompt
 
     detail = client.get(f"/api/nodes/{attention['id']}", headers=V1).json()
@@ -126,7 +126,7 @@ def test_chat_history_is_sent_to_model(env):
     node_id = graph["nodes"][0]["id"]
     client.post(f"/api/nodes/{node_id}/chat", json={"message": "first"}, headers=V1)
     client.post(f"/api/nodes/{node_id}/chat", json={"message": "second"}, headers=V1)
-    turns = llm.calls[-1]["turns"]
+    turns = [c for c in llm.calls if c["kind"] == "chat"][-1]["turns"]
     assert next(t.content for t in turns) == "first"
     assert turns[-1].content == "second"
 

@@ -1,8 +1,9 @@
 # Pilot results
 
 Small, hand-run pilots used to decide what to build next. Each one is a
-handful of model calls on `gemini-3.5-flash-lite` (free tier), judged by one
-person (Apoorv). **They are not benchmarks**: sample sizes are tiny, model
+handful of model calls on `gemini-3.5-flash-lite` (free tier), reviewed by
+one person (Apoorv); the starter-map edge marks were Claude's second-opinion
+estimate in claude.ai. **They are not benchmarks**: sample sizes are tiny, model
 output varies between runs, and the tutor replies differed between reruns.
 
 | File | What | Date |

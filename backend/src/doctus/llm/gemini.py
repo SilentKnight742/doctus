@@ -1,10 +1,33 @@
 """Gemini provider, using the google-genai SDK."""
 
+import math
+
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel
 
-from .base import LLM, LLMError, Turn
+from .base import LLM, LLMError, RateLimited, Turn
+
+DEFAULT_RETRY_AFTER = 60
+
+
+def retry_after_seconds(exc) -> int:
+    """Seconds to wait, from the error's RetryInfo ("retryDelay": "37s"), else a
+    Retry-After header, else a default. Always at least 1."""
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        for item in (details.get("error") or {}).get("details") or []:
+            delay = item.get("retryDelay") if isinstance(item, dict) else None
+            if isinstance(delay, str) and delay.endswith("s"):
+                try:
+                    return max(1, math.ceil(float(delay[:-1])))
+                except ValueError:
+                    pass
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        return max(1, int(headers.get("retry-after", "")))
+    except (TypeError, ValueError):
+        return DEFAULT_RETRY_AFTER
 
 
 class GeminiLLM(LLM):
@@ -18,8 +41,13 @@ class GeminiLLM(LLM):
                 model=self._model, contents=contents, config=config
             )
         except errors.APIError as exc:
-            # 429 = free-tier rate limit; surface it clearly.
-            raise LLMError(f"Gemini API error ({getattr(exc, 'code', '?')}): {exc}") from exc
+            code = getattr(exc, "code", None)
+            if code == 429:
+                raise RateLimited(
+                    "Gemini rate limit reached; try again shortly.",
+                    retry_after=retry_after_seconds(exc),
+                ) from exc
+            raise LLMError(f"Gemini API error ({code or '?'}): {exc}") from exc
         text = response.text
         if not text:
             raise LLMError("Gemini returned an empty response (possibly blocked).")

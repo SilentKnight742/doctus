@@ -15,27 +15,37 @@ from .base import LLM, Turn
 
 class FakeLLM(LLM):
     def __init__(self):
-        self.json_answers: deque[str] = deque()
-        self.chat_answers: deque[str] = deque()
+        self.json_answers: deque[str | Exception] = deque()
+        self.chat_answers: deque[str | Exception] = deque()
         self.calls: list[dict] = []
 
-    def queue_json(self, answer: dict | str):
-        self.json_answers.append(answer if isinstance(answer, str) else json.dumps(answer))
+    def queue_json(self, answer: dict | str | Exception):
+        """Queue a structured answer; an Exception instance is raised instead."""
+        if isinstance(answer, dict):
+            answer = json.dumps(answer)
+        self.json_answers.append(answer)
 
-    def queue_chat(self, answer: str):
+    def queue_chat(self, answer: str | Exception):
+        """Queue a chat reply; an Exception instance is raised instead."""
         self.chat_answers.append(answer)
 
     def chat(self, system: str, turns: list[Turn]) -> str:
         self.calls.append({"kind": "chat", "system": system, "turns": list(turns)})
         if self.chat_answers:
-            return self.chat_answers.popleft()
+            return _answer(self.chat_answers.popleft())
         return f"(offline reply) You said: {turns[-1].content}"
 
     def _raw_json(self, system: str, prompt: str, schema: type[BaseModel]) -> str:
         self.calls.append({"kind": "json", "system": system, "prompt": prompt, "schema": schema})
         if self.json_answers:
-            return self.json_answers.popleft()
+            return _answer(self.json_answers.popleft())
         return json.dumps(_canned(schema.__name__))
+
+
+def _answer(item):
+    if isinstance(item, Exception):
+        raise item
+    return item
 
 
 def _canned(schema_name: str) -> dict:
