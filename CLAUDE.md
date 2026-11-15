@@ -176,8 +176,11 @@ React + TypeScript + Vite in `frontend/`, with React Flow for the graph.
   then refresh.
 - A "context used" toggle on assistant messages, off by default (a
   development aid).
-- Light and dark themes. The look should be calm and readable rather than a
-  generic template; it is a showcase.
+- Light and dark themes. **Visual direction is not decided yet** (decided
+  2026-11-15): build with neutral greys and the system font. Every colour,
+  font, size, radius and spacing value lives as a CSS variable in one theme
+  file (`frontend/src/theme.css`); components use only those variables, so a
+  design can be dropped in later without touching them.
 - The visitor token is kept in `localStorage`, with a fallback when that is
   unavailable. The Vite dev server proxies `/api`. `make dev` starts the
   backend and frontend together.

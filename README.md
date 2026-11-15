@@ -6,8 +6,7 @@ Doctus is a learning companion. You chat with a tutor as you would with any
 good AI assistant, and a concept graph of what the chat actually covered grows
 alongside it.
 
-> **Status:** backend only. There is no frontend yet; try it through the
-> API docs at `/docs`. See
+> **Status:** backend done; the web UI (M2) is in progress. See
 > [Implemented vs in progress](#implemented-vs-in-progress).
 
 ## Design
@@ -70,17 +69,42 @@ Implemented:
 - Trail with `from_node_id`; distance from the origin.
 - 115 offline tests; one opt-in live Gemini test.
 
-Planned (M2, UI): React + Vite frontend with a chat screen, a graph screen
-with semantic zoom, and a live mini graph.
+In progress (M2, UI, `frontend/`): React + TypeScript + Vite, React Flow.
+
+- Subject list and a "start a subject" form.
+- Chat screen: markdown replies (tables, code), Enter to send and
+  Shift+Enter for a new line, a pending indicator, clear errors (429 shows
+  "rate limited, try again in N s"), a trail breadcrumb, a node detail
+  drawer (summary, evidence quotes, connections) and a live mini graph.
+- Graph screen: the full graph; selecting a node opens its chat in a
+  floating window (minimise, close, expand to the chat screen).
+- Semantic zoom: below zoom 0.55 only `part_of` roots are shown, from 0.55
+  to 1.0 depth 0-1, above 1.0 everything (with a small margin so it does
+  not flicker). Folded nodes show a "+N" count; edges between folded groups
+  are merged with a count; edges inside a group are hidden.
+- Layout: radial seed (origin at the centre, `part_of` children around
+  their parent, other topics on rings by distance) relaxed by a short,
+  deterministic spring pass. Positions are kept as the graph grows; "Tidy
+  layout" recomputes them.
+- After each message the UI polls `/graph/status` until the cartographer is
+  idle, then refreshes the graph; new nodes briefly highlight.
+- "Context used" toggle on replies received in the current session.
+- Light and dark themes with neutral placeholder styling. The visual design
+  is not decided: every colour, font, size, radius and spacing value is a
+  CSS variable in `frontend/src/theme.css`.
 
 ## Run it
 
-Needs [uv](https://docs.astral.sh/uv/) and GNU Make.
+Needs [uv](https://docs.astral.sh/uv/), Node 24 with npm, and GNU Make.
 
 ```bash
 cp backend/.env.example backend/.env   # then add GEMINI_API_KEY
-make dev                               # http://127.0.0.1:8000/docs
+make dev                               # UI at http://localhost:5173, API docs at :8000/docs
 ```
+
+`make dev` starts the backend and the Vite dev server together (Vite
+proxies `/api`); Ctrl-C stops both. The browser keeps its anonymous visitor
+token in `localStorage` (in memory when storage is unavailable).
 
 Offline, with canned model answers and no key:
 
@@ -106,9 +130,10 @@ Real environment variables win over `backend/.env`.
 ## Tests and lint
 
 ```bash
-make test   # offline; uses FakeLLM, no API key needed
-make lint   # ruff check and ruff format --check
-make fmt    # apply ruff fixes and formatting
+make test   # backend (FakeLLM, no API key) and frontend (Vitest) tests
+make lint   # ruff check, ruff format --check, oxlint, tsc
+make build  # production build of the frontend
+make fmt    # apply ruff fixes and formatting (backend)
 ```
 
 The opt-in live test makes one real chat call and one structured call:
@@ -157,12 +182,21 @@ backend/
     prompts.py       prompts and structured-output schemas
     llm/             provider interface, Gemini, fake model for tests
   tests/
+frontend/
+  src/
+    api/             typed client (visitor header, 429 + Retry-After)
+    graph/           layout, semantic zoom, React Flow canvas
+    chat/            thread, composer, markdown, node detail
+    screens/         home, chat screen, graph screen
+    shell/           app shell, chat window, breadcrumb
+    state/           per-subject state: graph, polling, positions
+    theme.css        all design tokens (placeholder, neutral)
 docs/eval/         small pilot results (not benchmarks)
 ```
 
 ## Current limits
 
-- No frontend.
+- The UI has no visual design yet (neutral placeholder theme).
 - Duplicate detection is by normalised name only; near-synonyms can become
   separate nodes.
 - The evidence check proves a quote is in the chat, not that the concept was
