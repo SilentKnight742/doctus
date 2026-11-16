@@ -37,6 +37,10 @@ class ChatIn(BaseModel):
     from_node_id: int | None = Field(default=None, ge=1, le=MAX_ID)
 
 
+class VisitIn(BaseModel):
+    from_node_id: int | None = Field(default=None, ge=1, le=MAX_ID)
+
+
 def visitor_token(x_doctus_visitor: str = Header(min_length=16, max_length=128)) -> str:
     return x_doctus_visitor
 
@@ -94,6 +98,22 @@ def create_app(
 
     def proposal_view(p):
         return {"id": p.id, "kind": p.kind, "status": p.status, "origin": p.origin, **p.payload}
+
+    def record_trail(visitor: str, subject: dict, node, from_node_id: int | None) -> bool:
+        """Add a trail step for arriving at `node`. Arriving from itself is
+        not a step, and nothing is added when the last step is already this
+        node. Returns True when a step was added."""
+        if from_node_id == node.id:
+            from_node_id = None
+        if from_node_id is not None:
+            came_from = guard(store.get_node, visitor, from_node_id)
+            if came_from.subject_id != subject["id"]:
+                raise HTTPException(422, "from_node_id belongs to another subject.")
+        last = store.last_trail_step(subject["id"])
+        if last is not None and last.node_id == node.id:
+            return False
+        store.add_trail_step(subject["id"], node.id, from_node_id)
+        return True
 
     @app.get("/api/health")
     def health():
@@ -207,11 +227,9 @@ def create_app(
     ):
         node = guard(store.get_node, visitor, node_id)
         subject = store.get_subject(visitor, node.subject_id)
-        from_node_id = body.from_node_id
-        if from_node_id == node.id:
-            from_node_id = None  # arriving from itself is not a step
-        if from_node_id is not None:
-            came_from = guard(store.get_node, visitor, from_node_id)
+        if body.from_node_id is not None and body.from_node_id != node.id:
+            # Validate before spending a model call.
+            came_from = guard(store.get_node, visitor, body.from_node_id)
             if came_from.subject_id != subject["id"]:
                 raise HTTPException(422, "from_node_id belongs to another subject.")
         answer, ctx, history_turns = guard(
@@ -227,9 +245,7 @@ def create_app(
         store.add_message(subject["id"], node.id, "user", body.message)
         store.add_message(subject["id"], node.id, "assistant", answer)
         store.mark_visited(node.id)
-        last = store.last_trail_step(subject["id"])
-        if last is None or last.node_id != node.id:
-            store.add_trail_step(subject["id"], node.id, from_node_id)
+        record_trail(visitor, subject, node, body.from_node_id)
 
         # The cartographer runs after the response is sent, so the reply is
         # never delayed. Poll /graph/status for the result.
@@ -239,6 +255,21 @@ def create_app(
             "reply": answer,
             "context_used": {**ctx.used, "recent_turns": history_turns},
             **store.graph_status(subject["id"]),
+        }
+
+    @app.post("/api/nodes/{node_id}/visit")
+    def visit(node_id: Id, body: VisitIn | None = None, visitor: str = Depends(visitor_token)):
+        """The learner opened this node's chat: record a trail step."""
+        node = guard(store.get_node, visitor, node_id)
+        subject = store.get_subject(visitor, node.subject_id)
+        from_node_id = body.from_node_id if body else None
+        recorded = record_trail(visitor, subject, node, from_node_id)
+        return {
+            "recorded": recorded,
+            "trail": [
+                {"node_id": t.node_id, "from_node_id": t.from_node_id, "at": t.at}
+                for t in store.list_trail(subject["id"])
+            ],
         }
 
     @app.post("/api/nodes/{node_id}/extract")

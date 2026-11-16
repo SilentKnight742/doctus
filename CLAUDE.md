@@ -42,14 +42,14 @@ Every learner message touches two separate layers with separate prompts:
    conversation, not from forcing a question-and-answer format.
 
 ## Status (2026-11-15)
-- Backend done: store, LLM layer (Gemini + FakeLLM), exploration graph
-  (covered/frontier/evidence/trail/dismiss), extraction, origin chat that
-  answers the whole question at once. 64 offline tests pass.
-- M0 (`chore/repo-hygiene`, PR open): history rewritten to the noreply
-  identity and force-pushed once (done; no more force-pushes). Backend moved
-  to `backend/` (uv + lockfile, ruff, `make dev|test|lint|fmt`); CI runs
-  backend lint and tests on Python 3.11; README rewritten for the current
-  design; pilots saved in `docs/eval/`.
+- M0 (`chore/repo-hygiene`) merged: noreply history (force-pushed once; no
+  more force-pushes), backend in `backend/` (uv + lockfile, ruff,
+  `make dev|test|lint|fmt`), CI on Python 3.11, README, pilots in `docs/eval/`.
+- M1 (`feat/tutor-and-cartographer`) merged: tutor and cartographer split
+  (cartographer runs in the background after every exchange, `graph_version`
+  + `cartographer: idle | running | error`), `part_of` edges with one parent
+  and per-kind cycle checks, frontier removed, traversal helpers, 429 with
+  `Retry-After`. 115 offline tests pass; 5 live scenarios passed.
 - Local dev: `backend/.env` and `backend/doctus.db` (both git-ignored).
   `make test` uses `uv run python -m pytest` in `backend/.venv`, which avoids
   Kali's system pytest.
@@ -57,7 +57,21 @@ Every learner message touches two separate layers with separate prompts:
   runs on German (5 covered, 8 quotes verified, 0 dropped) and "starter Pokemon
   of all regions" (9 covered, 11 verified, 0 dropped). Narrative subjects (a TV
   episode) produce plot/cause links, not learning dependencies: a known limit.
-- No frontend yet. Next: M1 after M0 is merged.
+- Known limit: the tutor on `gemini-3.5-flash-lite` makes small factual slips
+  (5 in about 16 replies in testing). The evidence check proves a quote is in
+  the chat, not that it is correct. A stronger tutor model is planned.
+- M2 (`feat/ui`, PR open): React + Vite UI with chat and graph screens,
+  floating chat window, mini graph, trail breadcrumb (`POST /visit` records
+  a step when a chat opens), size-driven semantic zoom (S(d) = S0 * r^d,
+  merge below MIN on screen, split above MIN * 1.15, origin's direct parts
+  never merge, min zoom MIN / S0), neutral placeholder theme with every
+  design value in `frontend/src/theme.css`. 118 backend + 24 frontend tests.
+  Live check: 6-exchange Gemini session, 18 nodes, 26 quotes verified,
+  1 dropped, no 429s. Screenshots in `docs/screenshots/m2/`
+  (`frontend/scripts/screenshots.mjs`).
+- Open question for review: with MIN = 48 px, labels are about 5 px at the
+  minimum zoom (MIN limits the box, not the text). Options: raise MIN to
+  about 110 px or keep a minimum on-screen label size.
 
 ## Git workflow (same as Videre)
 - Never commit or push directly to `main`. One branch per milestone
@@ -173,8 +187,11 @@ React + TypeScript + Vite in `frontend/`, with React Flow for the graph.
   then refresh.
 - A "context used" toggle on assistant messages, off by default (a
   development aid).
-- Light and dark themes. The look should be calm and readable rather than a
-  generic template; it is a showcase.
+- Light and dark themes. **Visual direction is not decided yet** (decided
+  2026-11-15): build with neutral greys and the system font. Every colour,
+  font, size, radius and spacing value lives as a CSS variable in one theme
+  file (`frontend/src/theme.css`); components use only those variables, so a
+  design can be dropped in later without touching them.
 - The visitor token is kept in `localStorage`, with a fallback when that is
   unavailable. The Vite dev server proxies `/api`. `make dev` starts the
   backend and frontend together.
