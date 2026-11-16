@@ -6,8 +6,14 @@ Doctus is a learning companion. You chat with a tutor as you would with any
 good AI assistant, and a concept graph of what the chat actually covered grows
 alongside it.
 
-> **Status:** backend done; the web UI (M2) is in progress. See
+> **Status:** backend done; the web UI (M2) is in review. See
 > [Implemented vs in progress](#implemented-vs-in-progress).
+
+![Chat screen with the live mini graph](docs/screenshots/m2/chat-screen.png)
+
+More in [docs/screenshots/m2/](docs/screenshots/m2/): the graph screen at
+each zoom level and the floating chat window, from a short live Gemini
+session.
 
 ## Design
 
@@ -70,7 +76,7 @@ Implemented:
 - 118 backend offline tests; one opt-in live Gemini test. 24 frontend
   unit tests (Vitest).
 
-In progress (M2, UI, `frontend/`): React + TypeScript + Vite, React Flow.
+M2, UI (`frontend/`, in review): React + TypeScript + Vite, React Flow.
 
 - Subject list and a "start a subject" form.
 - Chat screen: markdown replies (tables, code), Enter to send and
@@ -214,6 +220,8 @@ docs/eval/         small pilot results (not benchmarks)
 ## Current limits
 
 - The UI has no visual design yet (neutral placeholder theme).
+- At the furthest zoom-out, node labels are too small to read (about 5 px):
+  the 48 px minimum limits the node box, not its text.
 - Duplicate detection is by normalised name only; near-synonyms can become
   separate nodes.
 - The evidence check proves a quote is in the chat, not that the concept was

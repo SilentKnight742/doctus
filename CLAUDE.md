@@ -60,7 +60,18 @@ Every learner message touches two separate layers with separate prompts:
 - Known limit: the tutor on `gemini-3.5-flash-lite` makes small factual slips
   (5 in about 16 replies in testing). The evidence check proves a quote is in
   the chat, not that it is correct. A stronger tutor model is planned.
-- In progress: M2 (`feat/ui`).
+- M2 (`feat/ui`, PR open): React + Vite UI with chat and graph screens,
+  floating chat window, mini graph, trail breadcrumb (`POST /visit` records
+  a step when a chat opens), size-driven semantic zoom (S(d) = S0 * r^d,
+  merge below MIN on screen, split above MIN * 1.15, origin's direct parts
+  never merge, min zoom MIN / S0), neutral placeholder theme with every
+  design value in `frontend/src/theme.css`. 118 backend + 24 frontend tests.
+  Live check: 6-exchange Gemini session, 18 nodes, 26 quotes verified,
+  1 dropped, no 429s. Screenshots in `docs/screenshots/m2/`
+  (`frontend/scripts/screenshots.mjs`).
+- Open question for review: with MIN = 48 px, labels are about 5 px at the
+  minimum zoom (MIN limits the box, not the text). Options: raise MIN to
+  about 110 px or keep a minimum on-screen label size.
 
 ## Git workflow (same as Videre)
 - Never commit or push directly to `main`. One branch per milestone
