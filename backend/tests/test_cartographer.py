@@ -513,6 +513,50 @@ def test_trail_records_from_node_id_and_ignores_self(env):
     assert graph["edges"] == []  # trail steps are never edges
 
 
+def _trail(client, subject_id):
+    graph = client.get(f"/api/subjects/{subject_id}/graph", headers=V1).json()
+    return [(t["node_id"], t["from_node_id"]) for t in graph["trail"]]
+
+
+def test_visit_records_trail_with_from_node_id(env):
+    client, _, store = env
+    subj, origin_id = _new_subject(client)
+    other = store.insert_node(subj["id"], "Dativ", "")
+    res = client.post(f"/api/nodes/{origin_id}/visit", headers=V1)
+    assert res.status_code == 200 and res.json()["recorded"] is True
+    res = client.post(f"/api/nodes/{other.id}/visit", json={"from_node_id": origin_id}, headers=V1)
+    assert res.json()["recorded"] is True
+    assert res.json()["trail"][-1]["from_node_id"] == origin_id
+    assert _trail(client, subj["id"]) == [(origin_id, None), (other.id, origin_id)]
+
+
+def test_visit_dedupes_and_ignores_self(env):
+    client, *_ = env
+    subj, origin_id = _new_subject(client)
+    url = f"/api/nodes/{origin_id}/visit"
+    client.post(url, json={"from_node_id": origin_id}, headers=V1)  # self: no from
+    again = client.post(url, json={}, headers=V1)  # same node again: no step
+    assert again.json()["recorded"] is False
+    # A chat right after opening does not add a second step either.
+    _chat_api(client, origin_id, "hello")
+    assert _trail(client, subj["id"]) == [(origin_id, None)]
+    assert client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()["edges"] == []
+
+
+def test_visit_checks_scope_and_subject(env):
+    client, *_ = env
+    subj, origin_id = _new_subject(client)
+    _other_subj, other_origin = _new_subject(client)
+    assert client.post(f"/api/nodes/{origin_id}/visit", headers=V2).status_code == 404
+    res = client.post(
+        f"/api/nodes/{origin_id}/visit", json={"from_node_id": other_origin}, headers=V1
+    )
+    assert res.status_code == 422
+    res = client.post(f"/api/nodes/{origin_id}/visit", json={"from_node_id": 0}, headers=V1)
+    assert res.status_code == 422
+    assert _trail(client, subj["id"]) == []
+
+
 def test_nodes_are_flat_and_list_their_edges(env):
     client, _, store = env
     subj, origin_id = _new_subject(client)

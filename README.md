@@ -6,9 +6,14 @@ Doctus is a learning companion. You chat with a tutor as you would with any
 good AI assistant, and a concept graph of what the chat actually covered grows
 alongside it.
 
-> **Status:** backend only. There is no frontend yet; try it through the
-> API docs at `/docs`. See
+> **Status:** backend done; the web UI (M2) is in review. See
 > [Implemented vs in progress](#implemented-vs-in-progress).
+
+![Chat screen with the live mini graph](docs/screenshots/m2/chat-screen.png)
+
+More in [docs/screenshots/m2/](docs/screenshots/m2/): the graph screen at
+each zoom level and the floating chat window, from a short live Gemini
+session.
 
 ## Design
 
@@ -68,19 +73,51 @@ Implemented:
 - Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
   and the shortest `path` between two nodes.
 - Trail with `from_node_id`; distance from the origin.
-- 71 offline tests; one opt-in live Gemini test.
+- 118 backend offline tests; one opt-in live Gemini test. 24 frontend
+  unit tests (Vitest).
 
-Planned (M2, UI): React + Vite frontend with a chat screen, a graph screen
-with semantic zoom, and a live mini graph.
+M2, UI (`frontend/`, in review): React + TypeScript + Vite, React Flow.
+
+- Subject list and a "start a subject" form.
+- Chat screen: markdown replies (tables, code), Enter to send and
+  Shift+Enter for a new line, a pending indicator, clear errors (429 shows
+  "rate limited, try again in N s"), a trail breadcrumb, a node detail
+  drawer (summary, evidence quotes, connections) and a live mini graph.
+- Graph screen: the full graph; selecting a node opens its chat in a
+  floating window (minimise, close, expand to the chat screen). Opening a
+  chat records a trail step (`POST /api/nodes/{id}/visit`).
+- Semantic zoom by size: a node at `part_of` depth d is drawn at
+  S(d) = 160 px × 0.75^d. When S(d) × zoom drops below 48 px it merges into
+  its nearest visible `part_of` ancestor, which stays under its own name
+  and grows with the square root of what it holds (capped). It splits out
+  again above 48 × 1.15 px. The origin and its direct parts, and any node
+  without a `part_of` parent, never merge, and the furthest zoom-out is
+  48 / 160 = 0.3. Edges inside a group are hidden; parallel edges between
+  groups are merged into one thicker line. The constants are in
+  `frontend/src/theme.css`.
+- Layout: radial seed (origin at the centre, `part_of` children around
+  their parent, other topics on rings by distance) relaxed by a short,
+  deterministic spring pass. Positions are kept as the graph grows; "Tidy
+  layout" recomputes them.
+- After each message the UI polls `/graph/status` until the cartographer is
+  idle, then refreshes the graph; new nodes briefly highlight.
+- "Context used" toggle on replies received in the current session.
+- Light and dark themes with neutral placeholder styling. The visual design
+  is not decided: every colour, font, size, radius and spacing value is a
+  CSS variable in `frontend/src/theme.css`.
 
 ## Run it
 
-Needs [uv](https://docs.astral.sh/uv/) and GNU Make.
+Needs [uv](https://docs.astral.sh/uv/), Node 24 with npm, and GNU Make.
 
 ```bash
 cp backend/.env.example backend/.env   # then add GEMINI_API_KEY
-make dev                               # http://127.0.0.1:8000/docs
+make dev                               # UI at http://localhost:5173, API docs at :8000/docs
 ```
+
+`make dev` starts the backend and the Vite dev server together (Vite
+proxies `/api`); Ctrl-C stops both. The browser keeps its anonymous visitor
+token in `localStorage` (in memory when storage is unavailable).
 
 Offline, with canned model answers and no key:
 
@@ -106,9 +143,18 @@ Real environment variables win over `backend/.env`.
 ## Tests and lint
 
 ```bash
-make test   # offline; uses FakeLLM, no API key needed
-make lint   # ruff check and ruff format --check
-make fmt    # apply ruff fixes and formatting
+make test   # backend (FakeLLM, no API key) and frontend (Vitest) tests
+make lint   # ruff check, ruff format --check, oxlint, tsc
+make build  # production build of the frontend
+make fmt    # apply ruff fixes and formatting (backend)
+```
+
+Screenshots of a running dev session (not part of CI; uses Playwright,
+optionally with a system Chromium):
+
+```bash
+cd frontend && CHROMIUM_PATH=/usr/bin/chromium node scripts/screenshots.mjs \
+  --subject 1 --visitor <token> --out screenshots --chat <node> --window <node>
 ```
 
 The opt-in live test makes one real chat call and one structured call:
@@ -128,6 +174,8 @@ GET  /api/subjects/{id}/graph/status     {graph_version, cartographer, error} (p
 GET  /api/nodes/{id}                     node, evidence, edges, context, chat history
 POST /api/nodes/{id}/chat                {message, from_node_id?} -> reply, context_used,
                                          graph_version, cartographer
+POST /api/nodes/{id}/visit               {from_node_id?} -> record a trail step on opening
+                                         a chat (no repeat of the last step)
 POST /api/nodes/{id}/extract             run the cartographer now (409 while one is running)
 
 # Older starter-map flow, outside the main flow:
@@ -157,16 +205,30 @@ backend/
     prompts.py       prompts and structured-output schemas
     llm/             provider interface, Gemini, fake model for tests
   tests/
+frontend/
+  src/
+    api/             typed client (visitor header, 429 + Retry-After)
+    graph/           layout, semantic zoom, React Flow canvas
+    chat/            thread, composer, markdown, node detail
+    screens/         home, chat screen, graph screen
+    shell/           app shell, chat window, breadcrumb
+    state/           per-subject state: graph, polling, positions
+    theme.css        all design tokens (placeholder, neutral)
 docs/eval/         small pilot results (not benchmarks)
 ```
 
 ## Current limits
 
-- No frontend.
+- The UI has no visual design yet (neutral placeholder theme).
+- At the furthest zoom-out, node labels are too small to read (about 5 px):
+  the 48 px minimum limits the node box, not its text.
 - Duplicate detection is by normalised name only; near-synonyms can become
   separate nodes.
 - The evidence check proves a quote is in the chat, not that the concept was
   taught well; the model still chooses which concepts to record.
+- The tutor on `gemini-3.5-flash-lite` makes small factual slips (5 in about
+  16 replies in testing). The evidence check proves a quote is in the chat,
+  not that what it says is correct. A stronger tutor model is planned.
 - Narrative subjects (for example a TV episode) produce plot or cause links
   rather than learning dependencies.
 - Tests and mastery updates are not wired to endpoints yet.
