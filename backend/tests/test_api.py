@@ -44,8 +44,6 @@ def env():
         llm_provider="fake",
         gemini_api_key=None,
         gemini_model="x",
-        max_proposals_per_update=5,
-        recent_turns_in_context=8,
     )
     app = create_app(
         store=store, llm=llm, mastery=PlaceholderDecayModel(), settings=settings, clock=clock
@@ -88,7 +86,7 @@ def test_accepting_skeleton_builds_graph(env):
     client, llm, *_ = env
     _, graph = _subject_with_graph(client, llm)
     names = [n["name"] for n in graph["nodes"]]
-    assert names == ["Transformers", "Vectors", "Dot product", "Attention"]  # origin first
+    assert names == ["Vectors", "Dot product", "Attention"]  # no origin concept any more
     assert len(graph["edges"]) == 2
     assert graph["proposal_stats"]["accepted"] == 5
     assert all(n["level"] == 0 for n in graph["nodes"])
@@ -98,58 +96,6 @@ def test_other_visitor_cannot_see_graph(env):
     client, llm, *_ = env
     subject, _ = _subject_with_graph(client, llm)
     assert client.get(f"/api/subjects/{subject['id']}/graph", headers=V2).status_code == 404
-
-
-def test_topic_chat_uses_prerequisites_as_context(env):
-    client, llm, *_ = env
-    _, graph = _subject_with_graph(client, llm)
-    attention = next(n for n in graph["nodes"] if n["name"] == "Attention")
-    llm.queue_chat("Attention mixes values using dot-product scores.")
-    res = client.post(
-        f"/api/nodes/{attention['id']}/chat", json={"message": "What is attention?"}, headers=V1
-    ).json()
-
-    assert res["reply"].startswith("Attention mixes")
-    assert [p["name"] for p in res["context_used"]["prerequisites"]] == ["Dot product"]
-    system_prompt = [c for c in llm.calls if c["kind"] == "chat"][-1]["system"]
-    assert "Current topic: Attention" in system_prompt
-    assert "Dot product" in system_prompt
-
-    detail = client.get(f"/api/nodes/{attention['id']}", headers=V1).json()
-    assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
-    assert detail["node"]["last_visited_at"] is not None
-
-
-def test_chat_history_is_sent_to_model(env):
-    client, llm, *_ = env
-    _, graph = _subject_with_graph(client, llm)
-    node_id = graph["nodes"][0]["id"]
-    client.post(f"/api/nodes/{node_id}/chat", json={"message": "first"}, headers=V1)
-    client.post(f"/api/nodes/{node_id}/chat", json={"message": "second"}, headers=V1)
-    turns = [c for c in llm.calls if c["kind"] == "chat"][-1]["turns"]
-    assert next(t.content for t in turns) == "first"
-    assert turns[-1].content == "second"
-
-
-def test_update_graph_requires_chat_then_proposes(env):
-    client, llm, *_ = env
-    _, graph = _subject_with_graph(client, llm)
-    attention = next(n for n in graph["nodes"] if n["name"] == "Attention")
-    assert client.post(f"/api/nodes/{attention['id']}/update-graph", headers=V1).status_code == 409
-
-    client.post(f"/api/nodes/{attention['id']}/chat", json={"message": "and softmax?"}, headers=V1)
-    llm.queue_json(
-        {
-            "concepts": [
-                {"name": "Softmax", "summary": "Turns scores into weights."},
-                {"name": "Attention", "summary": "already exists"},
-            ],
-            "links": [{"prerequisite": "Softmax", "concept": "Attention", "reason": "normalises"}],
-        }
-    )
-    proposals = client.post(f"/api/nodes/{attention['id']}/update-graph", headers=V1).json()
-    assert [(p["kind"], p.get("name")) for p in proposals] == [("node", "Softmax"), ("edge", None)]
-    assert proposals[0]["origin"] == f"chat:node:{attention['id']}"
 
 
 def test_edge_accept_before_node_gives_clear_409(env):

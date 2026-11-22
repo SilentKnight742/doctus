@@ -1,7 +1,7 @@
 """The one interface every model provider implements.
 
 Doctus only needs two things from a model:
-  * a chat reply as plain text;
+  * a chat reply as plain text, whole or streamed in pieces;
   * a structured answer validated against a Pydantic schema.
 
 Structured output is never trusted as-is: it is parsed and validated,
@@ -11,6 +11,7 @@ back to the model.
 
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -43,6 +44,12 @@ class LLM(ABC):
     @abstractmethod
     def chat(self, system: str, turns: list[Turn]) -> str:
         """Return the assistant's next reply."""
+
+    def chat_stream(self, system: str, turns: list[Turn]) -> Iterator[str]:
+        """Yield the reply in pieces as it is written. Providers that cannot
+        stream yield the whole reply at once. Closing the iterator early stops
+        the generation."""
+        yield self.chat(system, turns)
 
     @abstractmethod
     def _raw_json(self, system: str, prompt: str, schema: type[BaseModel]) -> str:

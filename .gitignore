@@ -16,6 +16,7 @@ __pycache__/
 *.db-wal
 *.db-shm
 *.db.bak
+*.db.pre-m3
 
 # node (frontend arrives in M2)
 node_modules/

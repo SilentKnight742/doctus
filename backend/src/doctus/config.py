@@ -12,10 +12,11 @@ class Settings:
     llm_provider: str  # "gemini" or "fake"
     gemini_api_key: str | None
     gemini_model: str
-    max_proposals_per_update: int
-    recent_turns_in_context: int
     # Model for the cartographer; None means the chat model.
     graph_model: str | None = None
+    # Characters of branch conversation sent to the tutor (whole ancestor
+    # nodes are trimmed, oldest first, beyond this).
+    context_chars: int = 24_000
 
 
 def load_settings() -> Settings:
@@ -27,7 +28,6 @@ def load_settings() -> Settings:
         gemini_api_key=os.environ.get("GEMINI_API_KEY"),
         # Model names change often; override with DOCTUS_GEMINI_MODEL.
         gemini_model=os.environ.get("DOCTUS_GEMINI_MODEL", "gemini-3.5-flash-lite"),
-        max_proposals_per_update=int(os.environ.get("DOCTUS_MAX_PROPOSALS", "5")),
-        recent_turns_in_context=int(os.environ.get("DOCTUS_RECENT_TURNS", "8")),
         graph_model=os.environ.get("DOCTUS_GRAPH_MODEL") or None,
+        context_chars=int(os.environ.get("DOCTUS_CONTEXT_CHARS", "24000")),
     )
