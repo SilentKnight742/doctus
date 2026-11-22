@@ -90,6 +90,11 @@ Every learner message touches two separate layers with separate prompts:
   **M3 is the canvas backend, M4 the canvas UI.** Reuse M2's frontend
   scaffolding (build setup, CI, API client, chat and Markdown components, theme
   variables) and replace its screens.
+- 2026-11-22: M3 (`feat/branch-canvas`) in review: canvas tree, migration,
+  streamed chat with stop, branch context, cartographer title/keyword/
+  suggestions, 302 backend tests, one live German session
+  (docs/eval/canvas-german-2026-11-22.md). The M2 UI no longer works
+  against the backend until M4.
 - Known limit: the tutor on `gemini-3.5-flash-lite` makes small factual slips
   (5 in about 16 replies in testing). A stronger tutor model is planned.
 - Check git for which milestones are actually merged before starting; do not

@@ -1,0 +1,414 @@
+{
+  "subject": {
+    "id": 1,
+    "title": "German",
+    "goal": "get around on a trip",
+    "root_canvas_node_id": 1,
+    "graph_version": 19
+  },
+  "root_id": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "parent_id": null,
+      "kind": "chat",
+      "sort_index": 0,
+      "title": "German Noun Cases Overview",
+      "keyword": "cases",
+      "note_body": "",
+      "is_root": true,
+      "answered": true,
+      "pending": false,
+      "streaming": false,
+      "concepts": [
+        {
+          "id": 1,
+          "name": "Nominative case"
+        },
+        {
+          "id": 2,
+          "name": "Accusative case"
+        },
+        {
+          "id": 3,
+          "name": "Dative case"
+        },
+        {
+          "id": 4,
+          "name": "Genitive case"
+        }
+      ],
+      "messages": [
+        {
+          "id": 1,
+          "role": "user",
+          "content": "How do German noun cases work? Give me the big picture.",
+          "stopped": false
+        },
+        {
+          "id": 2,
+          "role": "assistant",
+          "content": "German noun cases tell you **what a noun is doing in a sentence**. \n\nIn English, we mostly…",
+          "stopped": false
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "parent_id": 1,
+      "kind": "chat",
+      "sort_index": 0,
+      "title": "Definite Articles Across German Cases",
+      "keyword": "articles",
+      "note_body": "",
+      "is_root": false,
+      "answered": true,
+      "pending": false,
+      "streaming": false,
+      "concepts": [
+        {
+          "id": 5,
+          "name": "Definite articles grid"
+        },
+        {
+          "id": 6,
+          "name": "Feminine definite article patterns"
+        },
+        {
+          "id": 7,
+          "name": "Neuter definite article patterns"
+        },
+        {
+          "id": 8,
+          "name": "Masculine definite article patterns"
+        },
+        {
+          "id": 9,
+          "name": "Plural definite article patterns"
+        }
+      ],
+      "messages": [
+        {
+          "id": 3,
+          "role": "user",
+          "content": "How do words like the change across these cases?",
+          "stopped": false
+        },
+        {
+          "id": 4,
+          "role": "assistant",
+          "content": "To see how \"the\" changes, we have to look at the gender of the noun (masculine, feminine, …",
+          "stopped": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "parent_id": 1,
+      "kind": "chat",
+      "sort_index": 1,
+      "title": "Two-way prepositions (Wechselpräpositionen)",
+      "keyword": "prepositions",
+      "note_body": "",
+      "is_root": false,
+      "answered": true,
+      "pending": false,
+      "streaming": false,
+      "concepts": [
+        {
+          "id": 10,
+          "name": "Two-way prepositions"
+        },
+        {
+          "id": 11,
+          "name": "Accusative with two-way prepositions"
+        },
+        {
+          "id": 12,
+          "name": "Dative with two-way prepositions"
+        }
+      ],
+      "messages": [
+        {
+          "id": 5,
+          "role": "user",
+          "content": "Explain the two-way prepositions (Wechselpräpositionen).",
+          "stopped": false
+        },
+        {
+          "id": 6,
+          "role": "assistant",
+          "content": "**Two-way prepositions** (*Wechselpräpositionen*) are a specific group of German prepositi…",
+          "stopped": false
+        },
+        {
+          "id": 7,
+          "role": "user",
+          "content": "So is it 'Ich gehe in die Stadt' or 'in der Stadt'?",
+          "stopped": false
+        },
+        {
+          "id": 8,
+          "role": "assistant",
+          "content": "It is **\"Ich gehe in die Stadt\"**. \n\nHere is why, using the rule we just looked at:\n\n* **\"…",
+          "stopped": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "parent_id": 3,
+      "kind": "note",
+      "sort_index": 0,
+      "title": "My rule",
+      "keyword": "My",
+      "note_body": "# My rule\nWohin -> accusative, Wo -> dative.",
+      "is_root": false,
+      "answered": false,
+      "pending": false,
+      "streaming": false,
+      "concepts": [],
+      "messages": []
+    },
+    {
+      "id": 5,
+      "parent_id": 4,
+      "kind": "chat",
+      "sort_index": 0,
+      "title": "Travel Sentences for Two-way Prepositions",
+      "keyword": "travel",
+      "note_body": "",
+      "is_root": false,
+      "answered": true,
+      "pending": false,
+      "streaming": false,
+      "concepts": [],
+      "messages": [
+        {
+          "id": 9,
+          "role": "user",
+          "content": "Give me 5 travel sentences that use this rule, with the case marked.",
+          "stopped": false
+        },
+        {
+          "id": 10,
+          "role": "assistant",
+          "content": "Here are 5 practical travel sentences using two-way prepositions, showing the shift betwee…",
+          "stopped": true
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "id": 1,
+      "kind": "related",
+      "reason": "Both cases form the core foundation of basic German sentence structure and travel phrasing.",
+      "from_concept": {
+        "id": 1,
+        "name": "Nominative case"
+      },
+      "to_concept": {
+        "id": 2,
+        "name": "Accusative case"
+      },
+      "from_node": 1,
+      "to_node": 1
+    },
+    {
+      "id": 2,
+      "kind": "related",
+      "reason": "They represent the next levels of object roles in a sentence after the nominative subject.",
+      "from_concept": {
+        "id": 2,
+        "name": "Accusative case"
+      },
+      "to_concept": {
+        "id": 3,
+        "name": "Dative case"
+      },
+      "from_node": 1,
+      "to_node": 1
+    },
+    {
+      "id": 3,
+      "kind": "related",
+      "reason": "They complete the set of the four German noun cases.",
+      "from_concept": {
+        "id": 3,
+        "name": "Dative case"
+      },
+      "to_concept": {
+        "id": 4,
+        "name": "Genitive case"
+      },
+      "from_node": 1,
+      "to_node": 1
+    },
+    {
+      "id": 4,
+      "kind": "prerequisite",
+      "reason": "Understanding the cases themselves is necessary before learning how articles decline across them.",
+      "from_concept": {
+        "id": 1,
+        "name": "Nominative case"
+      },
+      "to_concept": {
+        "id": 5,
+        "name": "Definite articles grid"
+      },
+      "from_node": 1,
+      "to_node": 2
+    },
+    {
+      "id": 5,
+      "kind": "prerequisite",
+      "reason": "Knowing what direct objects are helps make sense of the accusative article row.",
+      "from_concept": {
+        "id": 2,
+        "name": "Accusative case"
+      },
+      "to_concept": {
+        "id": 5,
+        "name": "Definite articles grid"
+      },
+      "from_node": 1,
+      "to_node": 2
+    },
+    {
+      "id": 6,
+      "kind": "prerequisite",
+      "reason": "Knowing dative functions like location and indirect objects is needed to understand the dative articles.",
+      "from_concept": {
+        "id": 3,
+        "name": "Dative case"
+      },
+      "to_concept": {
+        "id": 5,
+        "name": "Definite articles grid"
+      },
+      "from_node": 1,
+      "to_node": 2
+    },
+    {
+      "id": 7,
+      "kind": "prerequisite",
+      "reason": "Understanding possession helps contextualize the genitive row in the article table.",
+      "from_concept": {
+        "id": 4,
+        "name": "Genitive case"
+      },
+      "to_concept": {
+        "id": 5,
+        "name": "Definite articles grid"
+      },
+      "from_node": 1,
+      "to_node": 2
+    },
+    {
+      "id": 8,
+      "kind": "prerequisite",
+      "reason": "You need to know how the accusative case works before applying it to two-way prepositions.",
+      "from_concept": {
+        "id": 2,
+        "name": "Accusative case"
+      },
+      "to_concept": {
+        "id": 11,
+        "name": "Accusative with two-way prepositions"
+      },
+      "from_node": 1,
+      "to_node": 3
+    },
+    {
+      "id": 9,
+      "kind": "prerequisite",
+      "reason": "You need to know how the dative case works before applying it to two-way prepositions.",
+      "from_concept": {
+        "id": 3,
+        "name": "Dative case"
+      },
+      "to_concept": {
+        "id": 12,
+        "name": "Dative with two-way prepositions"
+      },
+      "from_node": 1,
+      "to_node": 3
+    },
+    {
+      "id": 10,
+      "kind": "related",
+      "reason": "Both represent the two contrasting choices of case when using two-way prepositions.",
+      "from_concept": {
+        "id": 11,
+        "name": "Accusative with two-way prepositions"
+      },
+      "to_concept": {
+        "id": 12,
+        "name": "Dative with two-way prepositions"
+      },
+      "from_node": 3,
+      "to_node": 3
+    }
+  ],
+  "suggestions": [
+    {
+      "id": 2,
+      "canvas_node_id": 1,
+      "text": "Can we see how this applies to ordering in a restaurant?"
+    },
+    {
+      "id": 3,
+      "canvas_node_id": 1,
+      "text": "What prepositions trigger the dative case?"
+    },
+    {
+      "id": 4,
+      "canvas_node_id": 2,
+      "text": "How do indefinite articles like 'a' or 'an' change across the cases?"
+    },
+    {
+      "id": 5,
+      "canvas_node_id": 2,
+      "text": "Can you show me more examples of dative prepositions when asking for directions?"
+    },
+    {
+      "id": 6,
+      "canvas_node_id": 2,
+      "text": "How do plural nouns actually change when they take that extra -n in the dative case?"
+    },
+    {
+      "id": 7,
+      "canvas_node_id": 3,
+      "text": "Can you give me examples with plural nouns?"
+    },
+    {
+      "id": 8,
+      "canvas_node_id": 3,
+      "text": "What about contractions like ins or im?"
+    },
+    {
+      "id": 9,
+      "canvas_node_id": 3,
+      "text": "How do I ask where something is using these prepositions?"
+    },
+    {
+      "id": 10,
+      "canvas_node_id": 5,
+      "text": "Can you give me the rest of the hotel room example?"
+    },
+    {
+      "id": 11,
+      "canvas_node_id": 5,
+      "text": "Show me an example with putting something into a bag."
+    },
+    {
+      "id": 12,
+      "canvas_node_id": 5,
+      "text": "Give me an example about sitting at a table in a restaurant."
+    }
+  ],
+  "graph_version": 19,
+  "cartographer": "idle",
+  "error": null
+}

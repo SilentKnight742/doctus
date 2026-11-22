@@ -3,10 +3,13 @@
 *Latin: "one who teaches."*
 
 Doctus is a learning companion. You chat with a tutor as you would with any
-good AI assistant, and a concept graph of what the chat actually covered grows
-alongside it.
+good AI assistant, and a map of what you explored and were taught grows
+alongside the chat: a branching canvas of conversations, with the
+evidence-backed concepts each one taught.
 
-> **Status:** backend done; the web UI (M2) is in review. See
+> **Status:** M3 (the branch-canvas backend) is in review. The M2 web UI
+> still talks to the retired concept-chat endpoints, so it does not work
+> against this backend; M4 replaces it with the canvas UI. See
 > [Implemented vs in progress](#implemented-vs-in-progress).
 
 ![Chat screen with the live mini graph](docs/screenshots/m2/chat-screen.png)
@@ -17,43 +20,68 @@ session.
 
 ## Design
 
-- **Exploration graph, not a roadmap.** The graph records where the learner
-  actually went, like the trail of a Wikipedia game. It does not lay out a
-  syllabus in advance.
-- **Flat graph.** One kind of node and typed, directed edges. Nothing is
-  nested and there are no sub-nodes: every node has its own id
-  (`/api/nodes/{id}`) and its connections live in the edges table. Any
-  hierarchy is a view computed from edges.
-- **Origin.** A subject starts with a chat. Its first node, the origin, is
-  where learning began.
-- **Evidence check.** A node means "taught in the chat", not "learned". Every
-  node except the origin needs at least one quote copied from the
-  conversation. Code checks each quote against the stored messages (ignoring
-  case, whitespace and markdown emphasis); a concept with no verified quote is
-  not created, and the drop is counted.
-- **Typed edges.**
-  - `prerequisite`: A must be understood before B. The model must give a
-    reason that matches the arrow.
-  - `part_of`: A is a part of B (a region is part of "starter Pokemon"). At
-    most one `part_of` parent per node.
+- **Exploration canvas, not a roadmap.** A subject is a branching tree that
+  records where the learner actually went, like the trail of a Wikipedia
+  game. It does not lay out a syllabus in advance.
+- **Canvas nodes** form the tree; each has one parent, and the root is the
+  chat where the subject began.
+  - `chat` node: its own conversation with the tutor. A follow-up inside the
+    node continues it; going somewhere new is a child chat node.
+  - `note` node: the learner's own Markdown. No AI.
+  - The learner creates the nodes; the tutor only *suggests* branches.
+- **Concepts** are the evidence layer. The cartographer extracts the
+  concepts *taught* in a chat node. Every concept needs at least one quote
+  copied from that node's conversation; code checks each quote against the
+  stored messages (ignoring case, whitespace and markdown emphasis), and a
+  concept with no verified quote is not created. A concept means taught, not
+  learned. It is homed in the node where it was first taught; teaching it
+  again elsewhere adds evidence to the same concept (names are deduped
+  within the subject).
+- **Concept links** (directed, typed), drawn between the canvas nodes that
+  home their two concepts, so they can cross branches:
+  - `prerequisite`: A must be understood before B; the reason must match the
+    arrow. No cycles.
   - `related`: adjacent, no direction meaning.
-  - No cycles in `prerequisite` or in `part_of`.
-- **Trail.** The order the learner visited nodes is stored separately and is
-  never mixed with edges.
-- **Semantic zoom (UI).** Zoomed out, nodes collapse into their `part_of`
-  ancestors so you see high-level topics; zooming in expands them. Computed
-  from `part_of` edges at render time, not stored.
+  - `part_of` is retired: the branch tree is the hierarchy. Old `part_of`
+    edges stay in the database and are left out of the canvas.
+- **Suggestions.** After each exchange the cartographer may offer up to 3
+  follow-up questions for that node. Accepting one creates a child chat node
+  with it as the first question. A suggestion is never a node or a concept
+  until accepted.
 - **Two AI layers** with separate prompts:
-  1. **Tutor**: talks with the learner. It never mentions the graph and is
-     never asked to produce graph material.
-  2. **Cartographer**: reads the latest exchange after the tutor replies and
-     updates the graph under the evidence and edge rules above.
+  1. **Tutor**: talks with the learner and never mentions the canvas, nodes
+     or concepts. It sees the node's branch (its ancestors' conversations,
+     oldest trimmed first to a budget and then named by title; sibling
+     branches excluded), notes on that path quoted as the learner's own
+     words, and quiet concept context (what this branch taught, and
+     prerequisites taught elsewhere).
+  2. **Cartographer**: after each full or stopped reply, one call returns the
+     node's concepts with evidence, concept links, the node's title and
+     keyword, and up to 3 suggestions. The title is set from the first
+     exchange and changes only if the topic clearly shifts.
 - **Mastery is not decided.** Strength and decay go through a swappable
   `MasteryModel` interface; the current `PlaceholderDecayModel` is a stand-in.
 
 ## Implemented vs in progress
 
-Implemented:
+M3, branch canvas (backend, in review):
+
+- `canvas_nodes` tree (one parent, one root per subject, no move operation,
+  so no cycles), `suggestions`, `messages.canvas_node_id` and `stopped`,
+  `nodes.home_canvas_node_id`. Schema version via `PRAGMA user_version`;
+  the migration gives each existing subject one root chat node holding all
+  its messages (M1/M2 per-concept chats merged in id order; dev data) and
+  keeps a copy of the old database as `doctus.db.pre-m3`.
+- Endpoints for the canvas, child/sibling nodes, note and prompt edits,
+  note/chat switching before an answer, branch delete with confirmation,
+  subject rename, suggestions, branch path, search, and streamed replies with
+  stop (see [API](#api)). Every canvas change bumps `graph_version`.
+- Deleting a branch deletes concepts left with no evidence and rehomes
+  concepts that still have evidence elsewhere.
+- Tutor replies stream as server-sent events; a stopped reply keeps what was
+  written, and the cartographer runs only after the stream has finished.
+
+Implemented earlier:
 
 - SQLite store (WAL) with anonymous visitor scoping (`X-Doctus-Visitor`
   header).
@@ -73,10 +101,11 @@ Implemented:
 - Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
   and the shortest `path` between two nodes.
 - Trail with `from_node_id`; distance from the origin.
-- 118 backend offline tests; one opt-in live Gemini test. 24 frontend
-  unit tests (Vitest).
+- 302 backend offline tests; opt-in live Gemini tests. 24 frontend unit
+  tests (Vitest).
 
-M2, UI (`frontend/`, in review): React + TypeScript + Vite, React Flow.
+M2, UI (`frontend/`, merged; superseded by M4): React + TypeScript + Vite,
+React Flow. It used the concept-chat endpoints that M3 removed.
 
 - Subject list and a "start a subject" form.
 - Chat screen: markdown replies (tables, code), Enter to send and
@@ -135,8 +164,7 @@ characters).
 | `DOCTUS_GEMINI_MODEL` | `gemini-3.5-flash-lite` | Any Gemini model your key can use |
 | `DOCTUS_GRAPH_MODEL` | empty (= chat model) | Model for the cartographer |
 | `DOCTUS_DB` | `doctus.db` | SQLite file (relative to `backend/`) |
-| `DOCTUS_MAX_PROPOSALS` | `5` | Max proposals per update (starter-map flow) |
-| `DOCTUS_RECENT_TURNS` | `8` | Chat turns sent to the tutor |
+| `DOCTUS_CONTEXT_CHARS` | `24000` | Characters of branch conversation sent to the tutor; older ancestor nodes are trimmed whole beyond this |
 
 Real environment variables win over `backend/.env`.
 
@@ -166,28 +194,67 @@ cd backend && uv run python -m pytest -m live
 ## API
 
 ```
-GET  /api/subjects                       list your subjects
-POST /api/subjects                       {title, goal} -> subject + origin node
-GET  /api/subjects/{id}/graph            nodes, edges (with kind), trail, graph_version,
-                                         cartographer state, run stats
-GET  /api/subjects/{id}/graph/status     {graph_version, cartographer, error} (poll this)
-GET  /api/nodes/{id}                     node, evidence, edges, context, chat history
-POST /api/nodes/{id}/chat                {message, from_node_id?} -> reply, context_used,
-                                         graph_version, cartographer
-POST /api/nodes/{id}/visit               {from_node_id?} -> record a trail step on opening
-                                         a chat (no repeat of the last step)
-POST /api/nodes/{id}/extract             run the cartographer now (409 while one is running)
+GET    /api/subjects                          list your subjects
+POST   /api/subjects                          {title, goal?, first_question?} -> subject
+                                              (with root_canvas_node_id)
+PATCH  /api/subjects/{id}                     {title}: rename
 
-# Older starter-map flow, outside the main flow:
-POST /api/subjects/{id}/skeleton         propose a starter map
-GET  /api/subjects/{id}/proposals        pending proposals
-POST /api/proposals/{id}/accept|reject
-POST /api/nodes/{id}/update-graph        propose changes from the recent chat
+GET    /api/subjects/{id}/canvas              nodes (with messages and concept chips),
+                                              links mapped to node pairs, open
+                                              suggestions, graph_version, cartographer
+GET    /api/subjects/{id}/canvas/status       {graph_version, cartographer, error} (poll this)
+GET    /api/subjects/{id}/search?q=           hits in titles, messages, notes, concepts:
+                                              {canvas_node_id, field, snippet}
+
+GET    /api/canvas-nodes/{id}                 detail: messages, concepts with evidence,
+                                              links, concepts also taught here, suggestions
+GET    /api/canvas-nodes/{id}/path            root-to-node chain as one document
+POST   /api/canvas-nodes/{id}/children        {kind: chat|note, text} -> new last child
+POST   /api/canvas-nodes/{id}/siblings        {kind, text} -> new node right after this one
+PATCH  /api/canvas-nodes/{id}                 {kind?, prompt?, note_body?}: kind and prompt
+                                              only before the node has an answer (409 after)
+DELETE /api/canvas-nodes/{id}[?confirm=branch]  a node with children needs confirm=branch;
+                                              the root cannot be deleted
+POST   /api/canvas-nodes/{id}/chat            {message?} -> SSE stream (below); no message
+                                              answers the node's waiting question
+POST   /api/canvas-nodes/{id}/stop            stop the reply being written (409 if none)
+POST   /api/canvas-nodes/{id}/extract         run the cartographer now (409 while one runs)
+POST   /api/suggestions/{id}/accept           -> new child chat node with that question
+
+# M1/M2 concept views, kept read-only, and the older starter-map flow:
+GET    /api/subjects/{id}/graph[/status]      concepts, edges, trail, run stats
+GET    /api/nodes/{id}                        one concept: evidence (with canvas node), edges
+POST   /api/nodes/{id}/visit                  {from_node_id?}: record a trail step
+POST   /api/subjects/{id}/skeleton            propose a starter map
+GET    /api/subjects/{id}/proposals           pending proposals
+POST   /api/proposals/{id}/accept|reject
 ```
 
-A chat reply comes back before the cartographer has run. To see the new
-graph, poll `/graph/status` until `cartographer` is `idle` (or `error`),
-then fetch `/graph`.
+Starting a subject: either send `first_question` with `POST /subjects` and
+then `POST /canvas-nodes/{root}/chat` with no message, or create it empty and
+send the first `/chat {message}` on the root.
+
+The chat stream is `text/event-stream`:
+
+```
+event: start   data: {user_message_id, context_used}
+event: delta   data: {text}                        (repeated)
+event: done    data: {message_id, stopped, graph_version, cartographer, error}
+event: error   data: {status, message, retry_after?, message_id}   (failure mid-reply)
+```
+
+The question is saved before the model is called. A failure before the
+first piece is a plain HTTP error (429 with `Retry-After` for rate limits,
+502 otherwise) and leaves the question waiting, so the client can retry with
+no message or edit it. A stop (or a dropped connection, or a failure
+mid-reply) saves what was written as a reply with `stopped: true`. The
+cartographer starts after the stream has finished; poll `/canvas/status`
+until `cartographer` is `idle` (or `error`), then fetch `/canvas`.
+
+**Single worker.** Replies in progress and their stop flags are kept in
+process memory, as are cartographer runs, so run one server process (the
+default `uvicorn` command). Several workers against one database would not
+see each other's streams or runs.
 
 ## Layout
 
@@ -196,11 +263,13 @@ backend/
   src/doctus/
     api.py           HTTP endpoints
     tutor.py         the tutor layer: prompt and chat call
-    cartographer.py  the cartographer layer: evidence-checked graph changes,
-                     background runs
-    store.py         SQLite storage, visitor scoping, edge rules, traversal
+    cartographer.py  the cartographer layer: evidence-checked concepts, links,
+                     title/keyword, suggestions; background runs
+    store.py         SQLite storage, migration, canvas tree, visitor scoping,
+                     edge rules, traversal, search
     graph.py         distance from origin; older proposal flow
-    context.py       the tutor's private notes and the "context used" record
+    context.py       the tutor's branch context (trimming, notes, concepts)
+                     and the "context used" record
     mastery.py       swappable mastery model (placeholder rule)
     prompts.py       prompts and structured-output schemas
     llm/             provider interface, Gemini, fake model for tests
@@ -235,8 +304,11 @@ docs/eval/         small pilot results (not benchmarks)
 - Single process, SQLite, no accounts (anonymous visitor tokens).
 - Free-tier Gemini rate limits are low. Each exchange is two calls (tutor
   and cartographer), so a burst of messages can return 429.
-- Cartographer runs are coordinated in process memory; running several
-  server processes against one database is not supported.
+- Cartographer runs and streamed replies are coordinated in process memory;
+  running several server processes against one database is not supported.
+- A stop takes effect at the next piece the model sends, not instantly.
+- A note's keyword is simply its title's first word (no model call).
+- The M2 UI does not work against the M3 backend; M4 replaces it.
 
 ## Pilot results
 
