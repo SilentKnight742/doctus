@@ -1,87 +1,108 @@
 # Doctus: project context for Claude Code
 
 Doctus is a learning companion: you chat with a tutor like any good AI
-assistant, and a concept graph of what you covered grows alongside the chat.
-Planning happens in claude.ai; building happens here. This is a
+assistant, and a map of what you explored and were taught grows alongside the
+chat. Planning happens in claude.ai; building happens here. This is a
 user-experience-first project: build, try it, improve. Prefer a working,
 pleasant slice over more planning.
 
-## Vision
-- **Exploration graph, not a roadmap** (think of the Wikipedia game). It records
-  only where the learner actually went. There are no suggestion or frontier
-  nodes (decided 2026-11-15).
-- **Flat graph.** One kind of node and typed edges, nothing nested, no sub-nodes.
-  Any hierarchy is a *view* computed from edges, never a storage structure.
-- **Origin**: a subject starts with a chat; its first node is where learning
-  began.
-- **Nodes** are concepts *taught in the chat*. Every node except the origin needs
-  at least one verbatim evidence quote, checked in code; without one, it is not
-  created. A node means taught, not learned; "learned" will come later from tests
-  and mastery.
-- **Edges** (directed, typed):
-  - `prerequisite`: A must be understood before B.
-  - `part_of`: A is a part of B (for example, a region is part of "starter
-    Pokemon"). A node has at most one `part_of` parent.
+## Vision (revised 2026-11-22 after studying mindmap.io)
+The canvas UI/UX follows mindmap.io's latest version (a branching tree of
+nodes, grown like a rabbit hole). What Doctus adds on top is the evidence-backed
+concept layer and much richer per-node visualisation.
+
+- **Exploration canvas, not a roadmap** (think of the Wikipedia game). A subject
+  is a branching tree that records where the learner actually went.
+- **Canvas nodes** form the tree. Each has at most one parent; the root is the
+  origin chat, where learning began.
+  - `chat` node: holds its own conversation with the tutor. A follow-up inside
+    the node continues that conversation; going somewhere new is a child chat
+    node (a new branch).
+  - `note` node: the learner's own text (Markdown). No AI.
+  - The learner creates the nodes. The tutor may only *suggest* branches (below).
+- **Concepts** (the evidence layer; this is Doctus's differentiator). The
+  cartographer extracts concepts *taught* in a chat node. Every concept needs at
+  least one verbatim evidence quote from that node's conversation, checked in
+  code; no quote, no concept. A concept means taught, not learned. A concept
+  belongs to the chat node where it was first taught; teaching it again in
+  another node adds evidence to the same concept (dedupe by normalised name
+  within the subject).
+- **Concept links** (directed, typed) between concepts:
+  - `prerequisite`: A must be understood before B; the reason must match the
+    arrow. No cycles.
   - `related`: adjacent, no direction meaning.
-  - No cycles in `prerequisite` or in `part_of`.
-- The **trail** (visit order) is separate and never mixed with edges.
-- **Semantic zoom (UI only).** Zoomed out, nodes collapse into their `part_of`
-  ancestors so you see high-level topics; zooming in expands them into detail.
-  Computed from `part_of` edges at render time.
+  - Links may cross branches. On the canvas they are drawn between the canvas
+    nodes that contain the two concepts. mindmap.io cannot do this because it is
+    a strict tree.
+- **`part_of` is retired (2026-11-22).** The branch tree is now the visible
+  hierarchy. `part_of` is already built: the cartographer stops emitting it and
+  the UI ignores it; deleting the code is a later cleanup.
+- **Suggestions (revises the 2026-11-15 "no suggestions" decision).** After each
+  exchange the cartographer may propose up to 3 short follow-up questions for
+  that chat node. They appear as faint chips under the node; clicking one
+  creates a child chat node with that question as its first message. A
+  suggestion is never a canvas node or a concept until accepted. Frontier nodes
+  stay removed.
+- **Branch path** replaces the trail in the UI: the chain from the root to a
+  node, readable as one continuous document. The existing trail table and
+  `/visit` can stay; the UI does not need them.
+- **Zoom**: (a) manual collapse of a branch, with a badge counting the hidden
+  nodes; (b) text levels by zoom: full card when zoomed in, the node's title at
+  mid zoom, one keyword when zoomed out. The cartographer writes the title and
+  keyword in the call it already makes (no extra model calls). This replaces
+  M2's size-driven `part_of` zoom.
+- **"Each node is its own world"**: much richer per-node visualisation is the
+  main thing Doctus will add over mindmap.io. Apoorv will define it. Until then,
+  keep the node interior simple and leave room for it (the node detail panel).
 - **Mastery rule is NOT decided.** Keep `PlaceholderDecayModel` behind the
   `MasteryModel` interface; build nothing that depends on its formula.
 - Gamification (later) rewards verified recall, not time or message counts.
 
 ## Two AI layers
 Every learner message touches two separate layers with separate prompts:
-1. **Tutor**: talks with the learner. It never mentions the graph, nodes or
-   extraction, and it is never told to create graph material.
-2. **Cartographer**: reads the latest exchange after the tutor replies and
-   updates the graph (nodes and typed edges) using the existing extraction and
-   evidence rules. The graph should come naturally from ordinary
-   conversation, not from forcing a question-and-answer format.
+1. **Tutor**: talks with the learner. It never mentions the canvas, nodes,
+   concepts or extraction, and it is never told to create graph material. Its
+   context is the node's branch (the conversations of its ancestor chat nodes,
+   oldest trimmed first to a budget, trimmed nodes represented by their titles)
+   plus quiet concept context (concepts already taught, prerequisites of the
+   current topic). Sibling branches are excluded.
+2. **Cartographer**: reads the latest exchange of a chat node after the tutor
+   replies. In one call it outputs: concepts with evidence quotes, concept
+   links, the node's title and keyword, and up to 3 suggestions. Existing
+   extraction and evidence rules apply.
 
-## Status (2026-11-15)
-- M0 (`chore/repo-hygiene`) merged: noreply history (force-pushed once; no
-  more force-pushes), backend in `backend/` (uv + lockfile, ruff,
-  `make dev|test|lint|fmt`), CI on Python 3.11, README, pilots in `docs/eval/`.
-- M1 (`feat/tutor-and-cartographer`) merged: tutor and cartographer split
-  (cartographer runs in the background after every exchange, `graph_version`
-  + `cartographer: idle | running | error`), `part_of` edges with one parent
-  and per-kind cycle checks, frontier removed, traversal helpers, 429 with
-  `Retry-After`. 115 offline tests pass; 5 live scenarios passed.
-- Local dev: `backend/.env` and `backend/doctus.db` (both git-ignored).
-  `make test` uses `uv run python -m pytest` in `backend/.venv`, which avoids
-  Kali's system pytest.
-- Pilots: starter map on German about 80-89% link precision; extraction live
-  runs on German (5 covered, 8 quotes verified, 0 dropped) and "starter Pokemon
-  of all regions" (9 covered, 11 verified, 0 dropped). Narrative subjects (a TV
-  episode) produce plot/cause links, not learning dependencies: a known limit.
+## Status
+- 2026-11-15: backend done: store, LLM layer (Gemini + FakeLLM), evidence-checked
+  extraction. Pilots: starter map on German about 80-89% link precision (Claude's
+  second-opinion marks); extraction live runs on German (5 covered, 8 quotes
+  verified, 0 dropped) and "starter Pokemon of all regions" (9 covered, 11
+  verified, 0 dropped). Narrative subjects (a TV episode) produce plot/cause
+  links, not learning dependencies: a known limit.
+- M0 merged (repo hygiene, `backend/`, CI, README, docs/eval).
+- M1 merged (tutor/cartographer split, `part_of` edges, no frontier, 429 with
+  Retry-After, 115 backend tests, 5 live scenarios passed).
+- **M2 merged (PR #3)**: the first frontend (two-screen layout: chat screen and
+  graph screen with a floating chat window, size-driven `part_of` zoom), plus
+  `/visit`, the frontend CI job, API client, Markdown chat and `theme.css`
+  variables.
+- 2026-11-22: design revised after the mindmap.io study (this file). The
+  two-screen layout and the `part_of` zoom are superseded by the branch canvas:
+  **M3 is the canvas backend, M4 the canvas UI.** Reuse M2's frontend
+  scaffolding (build setup, CI, API client, chat and Markdown components, theme
+  variables) and replace its screens.
 - Known limit: the tutor on `gemini-3.5-flash-lite` makes small factual slips
-  (5 in about 16 replies in testing). The evidence check proves a quote is in
-  the chat, not that it is correct. A stronger tutor model is planned.
-- M2 (`feat/ui`, PR open): React + Vite UI with chat and graph screens,
-  floating chat window, mini graph, trail breadcrumb (`POST /visit` records
-  a step when a chat opens), size-driven semantic zoom (S(d) = S0 * r^d,
-  merge below MIN on screen, split above MIN * 1.15, origin's direct parts
-  never merge, min zoom MIN / S0), neutral placeholder theme with every
-  design value in `frontend/src/theme.css`. 118 backend + 24 frontend tests.
-  Live check: 6-exchange Gemini session, 18 nodes, 26 quotes verified,
-  1 dropped, no 429s. Screenshots in `docs/screenshots/m2/`
-  (`frontend/scripts/screenshots.mjs`).
-- Open question for review: with MIN = 48 px, labels are about 5 px at the
-  minimum zoom (MIN limits the box, not the text). Options: raise MIN to
-  about 110 px or keep a minimum on-screen label size.
+  (5 in about 16 replies in testing). A stronger tutor model is planned.
+- Check git for which milestones are actually merged before starting; do not
+  assume.
 
 ## Git workflow (same as Videre)
 - Never commit or push directly to `main`. One branch per milestone
-  (`chore/...`, `feat/...`, `fix/...`), Conventional Commits
+  (`chore/...`, `feat/...`, `fix/...`, `docs/...`), Conventional Commits
   (`feat(ui): ...`, `fix(graph): ...`).
 - Run lint and tests before opening a PR. Open the PR with `gh pr create`,
-  then **STOP**: never merge it. Apoorv reviews and merges. Do not start the next
-  milestone until he says `main` has been updated (`git pull` first).
-- Never force-push and never use `--no-verify`, except the single exception
-  in M0 step 1.
+  then **STOP**: never merge it. Apoorv reviews and merges (squash). Do not start
+  the next milestone until he says `main` has been updated (`git pull` first).
+- Never force-push and never use `--no-verify`.
 - Push over **HTTPS** with Apoorv's saved GitHub login, never SSH. The remote
   must be `https://github.com/SilentKnight742/doctus.git`. Do not accept SSH
   host keys or create SSH keys.
@@ -90,114 +111,86 @@ Every learner message touches two separate layers with separate prompts:
 
 ## Milestones
 
-### M0 `chore/repo-hygiene`
-1. **One-time history fix (needs Apoorv's explicit OK before running).** All
-   existing commits have the author email `you@example.com`. Rewrite every
-   commit's author and committer to the identity above, verify with
-   `git log --format='%an <%ae>'`, then force-push `main` once with
-   `--force-with-lease`. Do this before creating any branch. This is the only
-   permitted force-push.
-2. Restructure like Videre: move the Python package to `backend/` (its own
-   `pyproject.toml`, `src/`, `tests/`, `.env.example`), and leave room for
-   `frontend/`. Add a root `Makefile` (`make dev`, `make test`, `make lint`)
-   and set up `ruff` (check and format) for the backend.
-3. Add `.github/workflows/ci.yml` running backend lint and tests on push to
-   `main` and on PRs (Python 3.11 or later; skip live tests). The frontend job
-   is added in M2.
-4. Rewrite `README.md` for the design in this file's Vision (flat graph,
-   evidence check, typed edges, semantic zoom, the two AI layers): what it is,
-   how to run it, current limits, and a short "implemented vs in progress" list.
-   No marketing language. M1 and M2 each update the README for what they change.
-5. Save the pilot results to `docs/eval/` (starter-map pilot, the German
-   extraction reruns, the Pokemon run), with numbers taken from the commit
-   messages and any saved raw output. Mark them as a small pilot, not a
-   benchmark.
-6. Update this file's Status section. Open the PR and stop.
+### M0-M2: merged
+See Status. Their detailed specs are in git history.
 
-### M1 `feat/tutor-and-cartographer`
-1. Split the layers: `tutor` (prompt plus chat call) and `cartographer` (the
-   existing extraction, triggered differently). Separate prompt constants and an
-   optional separate model setting (`DOCTUS_GRAPH_MODEL`, defaulting to the chat
-   model).
-2. **The cartographer runs after every exchange**, replacing the
-   every-3rd-message rule, in the background (FastAPI `BackgroundTasks`), so
-   the tutor's reply is never delayed. If it fails (for example a 429), leave
-   `last_extracted_message_id` where it is so the next exchange catches up; never
-   loop retries. Expose its state so the UI can poll: a per-subject
-   `graph_version` (incremented on every change) plus
-   `cartographer: idle | running | error`.
-3. **Rewrite the tutor prompt** (see "Tutor behaviour" below). Remove anything
-   that makes it drip-feed one or two lines and then quiz. Keep the rule that the
-   origin chat's first reply answers the whole question.
-4. Context the tutor receives stays quiet background: the current topic, its
-   prerequisites, its `part_of` parent and children, and nearby concepts. The
-   tutor must never narrate it.
-5. **Remove frontier entirely.** Drop the node `status` column and the
-   `dismissed` state, the `/dismiss` endpoint, frontier output from the
-   cartographer schema and prompt, and the frontier tests. Every node except the
-   origin must have verified evidence or it is not created. Delete any existing
-   frontier nodes in local databases (dev data only; no migration needed).
-6. **Edge kinds** become `prerequisite`, `part_of` and `related`. Enforce at
-   most one `part_of` parent per node (keep the first, skip and count later
-   ones) and no cycles in `prerequisite` or `part_of`. Teach the cartographer
-   when to use `part_of` (an overview's items are parts of the whole) and keep
-   the rule that every prerequisite reason must match the arrow.
-7. **Storage for traversal.** The graph stays an adjacency list (nodes table plus
-   edges table). Add indexes on edges `(from_id)`, `(to_id)` and `(kind)`.
-   Provide store helpers that use recursive SQL CTEs or BFS: `ancestors` and
-   `descendants` by edge kind, `path(a, b)` (shortest path over all edges,
-   ignoring direction), and `part_of_root(node)`.
-8. Tests with FakeLLM: tutor and cartographer calls are separate; a cartographer
-   failure does not break chat; catch-up after a failure; `graph_version`
-   increments; no node without evidence; single `part_of` parent enforced; cycle
-   checks per kind; traversal helpers. Then one live 6-message German chat; show
-   Apoorv the replies and the resulting graph. Open the PR and stop.
+### M3 `feat/branch-canvas` (backend for the canvas)
+1. **Storage.** Add a `canvas_nodes` table: `id`, `subject_id`, `parent_id`
+   (null only for the root), `kind` (`chat` | `note`), `sort_index`, `title`,
+   `keyword`, `note_body`, `created_at`. Messages get `canvas_node_id`. Concepts
+   (the existing evidence-backed nodes) get `home_canvas_node_id`; evidence keeps
+   pointing at message ids. Enforce one parent and no cycles. Dev data only: an
+   existing subject becomes a single root chat node holding all its messages.
+2. **Endpoints.** Create a child or sibling node (a chat node with its first
+   question, or a note); update a note's body; edit a chat node's prompt only
+   while it has no answer; delete a node (a branch delete needs a confirm flag);
+   rename a subject/map; get the subject canvas (nodes, concept chips per node,
+   concept links mapped to node pairs, open suggestions, `graph_version`); get a
+   branch path as one document; search (titles, messages, notes, concepts).
+3. **Tutor context** per the "Two AI layers" section: the ancestor branch within
+   a budget plus quiet concept context; siblings excluded.
+4. **Cartographer schema**: concepts + evidence, concept links, node title and
+   keyword, up to 3 suggestions, all in one call. Evidence check unchanged.
+   Dedupe concepts within a subject. Stop emitting `part_of`.
+5. **Suggestions**: accepting one creates a child chat node with that text as
+   its first message and removes the suggestion.
+6. **Streaming**: stream tutor replies (SSE) with a stop action; a stopped reply
+   keeps what was written. The cartographer runs after a full or stopped reply.
+7. Tests with FakeLLM: tree integrity (one parent, no cycles); tutor context
+   excludes siblings; evidence check per node; concept dedupe across nodes;
+   suggestion accept flow; branch path; search; prompt editing blocked after an
+   answer; stop keeps the partial reply. Then one live German session that
+   branches at least twice; show Apoorv the canvas JSON. Update the README.
+   Open the PR and stop.
 
-### M2 `feat/ui`
-React + TypeScript + Vite in `frontend/`, with React Flow for the graph.
-- **Two screens**, switchable at any time, plus a subject list or picker
-  (a home view or a slim left rail):
-  1. **Chat screen**: a full chat for the current node. A small live mini graph
-     sits in the top-right corner, highlights the current node and updates as
-     the graph grows. Clicking the mini graph opens the graph screen.
-  2. **Graph screen**: the full graph. Selecting a node opens its chat as a
-     floating window in the bottom-right, like Gmail's compose window, with
-     minimise, close and "expand to chat screen" controls. One window at a time
-     for now; selecting another node switches the window to that node.
-- **Chat** should feel like a normal AI chat app (in both the full screen and
-  the window): markdown rendering (headings, lists, tables, code), Enter to
-  send, Shift+Enter for a newline, a pending indicator, and errors shown clearly
-  (429 means "rate limited, try again in a minute").
-- **Graph**:
-  - Every node looks the same apart from the highlighted origin and the current
-    node. There are no frontier, suggestion or dismissed states.
-  - Edge styles: `prerequisite` solid with an arrow, `part_of` a thin connector
-    drawn toward the parent, `related` dashed with no arrow.
-  - **Semantic zoom**: zoomed out, nodes collapse into their `part_of` ancestors
-    (shown as a single node with a child count), and zooming in expands them.
-    Use two or three discrete zoom thresholds and compute it at render time.
-    Edges between collapsed nodes are merged.
-  - The layout keeps `part_of` children near their parent and the origin
-    central. New nodes briefly highlight when they appear.
-  - Opening a node's chat records the trail with `from_node_id`.
-  - The node detail (in the chat window header or a side drawer) shows the
-    summary, the evidence quotes and the edges.
-- A breadcrumb on the chat screen shows the trail.
+### M4 `feat/canvas-ui`
+React + TypeScript + Vite in `frontend/`, with React Flow for the canvas. Reuse
+M2's scaffolding; the two-screen layout (chat screen + graph screen with a
+floating chat window) and the size-driven `part_of` zoom are removed.
+- **Screens**: the canvas for one subject, plus a subject list (a home view or a
+  slim left rail). Maps can be renamed; the browser tab shows the map name.
+- **Visual design**: follow mindmap.io's element design closely (node cards,
+  connectors, controls, overall restraint) but with Doctus's own, slightly
+  different palette (an accent that is not their teal). **Plain background**: no
+  grid, dots or hexagon pattern (turn React Flow's `Background` off). Light and
+  dark themes. Keep every value in `theme.css`. Show Apoorv screenshots of both
+  themes before opening the PR.
+- **Node cards**: a chat card shows its prompt and the rendered answer (Markdown,
+  clamped with scroll), concept chips, and an input for follow-ups inside the
+  node. A note card shows Markdown. The origin is highlighted. New nodes
+  briefly highlight.
+- **Creating and editing**: arrow keys move the selection; Cmd/Ctrl+arrow adds
+  a child or a sibling; Enter edits; Esc leaves. Hovering a node shows + (add)
+  and − (collapse). Right-click opens a menu (add, edit, collapse, delete) where
+  each entry shows its shortcut. A node can switch between note and chat before
+  it is sent. Editing happens in place: other nodes dim, clicking away saves.
+  Suggestion chips sit under a chat node.
+- **Collapse**: a collapsed branch shows a badge counting the hidden nodes.
+- **Layout**: one layout only: branches on both sides of the root, read
+  clockwise (down the right, back up the left).
+- **Zoom and navigation**: zoom to fit (Shift+1), wheel zoom anchored on the
+  cursor, middle-mouse pan, zoom out to 15%. Three text levels by zoom: full
+  card, title, keyword.
+- **Search**: `/` opens search; matches highlight, everything else dims, and the
+  canvas moves to each result.
+- **Branch as document**: Space on a node opens the path from the root to it as
+  one continuous conversation in a side panel.
+- **Concept links**: `prerequisite` solid with an arrow, `related` dashed with
+  no arrow, drawn between canvas nodes. Faint by default, emphasised for the
+  selected node, with a toggle to hide them.
+- **Node detail panel** (selected node): its concepts with evidence quotes and
+  links. Leave room here for the "own world" work.
+- **Chat UX**: Markdown (headings, lists, tables, code), Enter to send,
+  Shift+Enter for a newline, streaming with a stop button and Ctrl+Esc, and
+  clear errors (429 means "rate limited, try again in a minute"). A "context
+  used" toggle on assistant messages, off by default (a development aid).
 - After each message, poll the graph status until the cartographer is idle,
   then refresh.
-- A "context used" toggle on assistant messages, off by default (a
-  development aid).
-- Light and dark themes. **Visual direction is not decided yet** (decided
-  2026-11-15): build with neutral greys and the system font. Every colour,
-  font, size, radius and spacing value lives as a CSS variable in one theme
-  file (`frontend/src/theme.css`); components use only those variables, so a
-  design can be dropped in later without touching them.
 - The visitor token is kept in `localStorage`, with a fallback when that is
   unavailable. The Vite dev server proxies `/api`. `make dev` starts the
   backend and frontend together.
-- Add the frontend CI job (lint, typecheck, test, build), a few Vitest tests
-  (API client, layout), and a Playwright screenshot of a real session for the
-  README.
+- Keep the frontend CI job passing; update the Vitest tests (API client, layout)
+  and the Playwright screenshots for the README.
 - Open the PR and stop.
 
 ## Tutor behaviour (prompt guidance)
@@ -216,20 +209,32 @@ happens to be an excellent teacher:
   graphs, nodes, levels or "context".
 - It corrects mistakes clearly and kindly, and says when it is unsure.
 
-## Ideas parked for later (do not build now)
+## Parked from the mindmap.io study (decided 2026-11-22; do not build now)
+- **Later**: drag to reorder siblings; tree and top-down layouts; eight pastel
+  node colours; subject-level tutor settings (their map system prompt); web
+  search with citations; images and PDFs on nodes; publish / clone / embed a
+  public read-only map (high priority later: a strong portfolio demo); touch
+  and phone support.
+- **Skipped**: AI auto-expand (it breaks the rule that the map records where the
+  learner went and what was taught); Milo-style map-editing agent; per-node
+  model choice; MCP server and public API; idle tips.
+
+## Other ideas parked for later (do not build now)
 - Learner feedback raised GraphQL; REST is fine for a single client, so revisit
   only if the API grows.
 - Ideas from Claude's memory architecture for long-term, per-subject context
   management.
 - Tests and revision, the mastery rule, gamification, the optional starter-map
   ("show me the territory") view, narrative subjects, import from other
-  platforms, deployment.
+  platforms, deployment, removing the retired `part_of` code.
 
 ## Conventions
 - Gemini model: `gemini-3.5-flash-lite` (free tier; confirmed working).
-  Override with `DOCTUS_GEMINI_MODEL`.
+  Override with `DOCTUS_GEMINI_MODEL`; the cartographer can use
+  `DOCTUS_GRAPH_MODEL`.
 - Run tests as `python -m pytest` with the venv active (`pytest` alone picks up
-  Kali's system pytest). Never "fix" that by changing code or deleting tests.
+  Kali's system pytest), or `make test`. Never "fix" that by changing code or
+  deleting tests.
 - Default tests use `FakeLLM`; only `-m live` tests call Gemini. Space out live
   calls (free tier).
 - Secrets live only in `.env` (git-ignored); `.env.example` documents them.
