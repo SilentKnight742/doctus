@@ -1331,6 +1331,22 @@ class Store:
         )
         return [self._node(r) for r in rows]
 
+    def concepts_evidenced_by_node(self, subject_id: int) -> dict[int, list[Node]]:
+        """For every canvas node of the subject, the concepts with at least one
+        (verified) evidence quote from that node's messages, in one query."""
+        rows = self._all(
+            """SELECT DISTINCT m.canvas_node_id AS taught_in, n.* FROM nodes n
+               JOIN node_evidence e ON e.node_id = n.id
+               JOIN messages m ON m.id = e.message_id
+               WHERE n.subject_id = ? AND m.canvas_node_id IS NOT NULL
+               ORDER BY m.canvas_node_id, n.id""",
+            (subject_id,),
+        )
+        out: dict[int, list[Node]] = {}
+        for r in rows:
+            out.setdefault(r["taught_in"], []).append(self._node(r))
+        return out
+
     def evidence_with_nodes(self, concept_id: int) -> list[dict]:
         rows = self._all(
             """SELECT e.quote, e.message_id, m.canvas_node_id FROM node_evidence e

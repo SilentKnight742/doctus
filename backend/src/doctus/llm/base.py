@@ -32,6 +32,14 @@ class RateLimited(LLMError):
         self.retry_after = retry_after
 
 
+class ModelBusy(LLMError):
+    """The provider is overloaded (HTTP 503); the same call may work shortly."""
+
+    def __init__(self, message: str, retry_after: int = 20):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 @dataclass(frozen=True)
 class Turn:
     role: str  # "user" or "assistant"

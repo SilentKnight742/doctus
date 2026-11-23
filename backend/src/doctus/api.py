@@ -23,7 +23,7 @@ from . import tutor
 from .cartographer import Busy, CartographerRunner
 from .config import Settings, load_settings
 from .graph import distances_from, propose_skeleton
-from .llm import LLM, LLMError, RateLimited, make_llm
+from .llm import LLM, LLMError, ModelBusy, RateLimited, make_llm
 from .mastery import MasteryModel, PlaceholderDecayModel
 from .store import CanvasNode, Conflict, Message, NotFound, Store
 
@@ -71,6 +71,16 @@ class VisitIn(BaseModel):
 
 def visitor_token(x_doctus_visitor: str = Header(min_length=16, max_length=128)) -> str:
     return x_doctus_visitor
+
+
+def error_status(exc: LLMError) -> int:
+    """The HTTP status a model failure maps to: 429 rate limited, 503 model
+    busy (both retryable, with Retry-After), else 502."""
+    if isinstance(exc, RateLimited):
+        return 429
+    if isinstance(exc, ModelBusy):
+        return 503
+    return 502
 
 
 def sse(event: str, data: dict) -> str:
@@ -157,6 +167,10 @@ def create_app(
             raise HTTPException(
                 429, str(exc), headers={"Retry-After": str(exc.retry_after)}
             ) from exc
+        except ModelBusy as exc:
+            raise HTTPException(
+                503, str(exc), headers={"Retry-After": str(exc.retry_after)}
+            ) from exc
         except LLMError as exc:
             raise HTTPException(502, str(exc)) from exc
 
@@ -182,7 +196,33 @@ def create_app(
             "created_at": m.created_at,
         }
 
-    def canvas_node_view(n: CanvasNode, messages: list[Message], concepts, active) -> dict:
+    def concept_chips(n: CanvasNode, homed, evidenced) -> list[dict]:
+        """Every concept taught in node `n`: the ones first taught here (home),
+        then ones homed elsewhere that have a verified evidence quote here."""
+        chips = [
+            {"id": c.id, "name": c.name, "home": True, "home_canvas_node_id": n.id} for c in homed
+        ]
+        seen = {c.id for c in homed}
+        for c in evidenced:
+            if c.id not in seen:
+                seen.add(c.id)
+                chips.append(
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "home": False,
+                        "home_canvas_node_id": c.home_canvas_node_id,
+                    }
+                )
+        return chips
+
+    def canvas_node_view(
+        n: CanvasNode,
+        messages: list[Message],
+        concepts: list[dict],
+        active,
+        unextracted: set[int] | frozenset[int] = frozenset(),
+    ) -> dict:
         return {
             "id": n.id,
             "parent_id": n.parent_id,
@@ -196,7 +236,9 @@ def create_app(
             # The latest message is a question still waiting for the tutor.
             "pending": bool(messages) and messages[-1].role == "user",
             "streaming": n.id in active,
-            "concepts": [{"id": c.id, "name": c.name} for c in concepts],
+            # A reply the cartographer has not processed yet (waiting, or failed).
+            "extract_pending": n.id in unextracted,
+            "concepts": concepts,
             "messages": [message_view(m) for m in messages],
         }
 
@@ -276,12 +318,20 @@ def create_app(
         for c in store.list_nodes(subject_id):
             if c.home_canvas_node_id is not None:
                 homed.setdefault(c.home_canvas_node_id, []).append(c)
+        evidenced = store.concepts_evidenced_by_node(subject_id)
+        unextracted = set(store.unextracted_chat_nodes(subject_id))
         active = streams.active()
         return {
             "subject": subject,
             "root_id": subject["root_canvas_node_id"],
             "nodes": [
-                canvas_node_view(n, messages.get(n.id, []), homed.get(n.id, []), active)
+                canvas_node_view(
+                    n,
+                    messages.get(n.id, []),
+                    concept_chips(n, homed.get(n.id, []), evidenced.get(n.id, [])),
+                    active,
+                    unextracted,
+                )
                 for n in nodes
             ],
             "links": link_views(subject_id),
@@ -321,19 +371,24 @@ def create_app(
                 "id": c.id,
                 "name": c.name,
                 "summary": c.summary,
+                "home": c.home_canvas_node_id == node.id,
                 "home_canvas_node_id": c.home_canvas_node_id,
                 "evidence": store.evidence_with_nodes(c.id),
             }
 
         messages = store.canvas_messages(node.id)
+        evidenced = store.concepts_evidenced_in(node.id)
+        unextracted = set(store.unextracted_chat_nodes(node.subject_id))
         return {
-            "node": canvas_node_view(node, messages, homed, streams.active()),
+            "node": canvas_node_view(
+                node,
+                messages,
+                concept_chips(node, list(reversed(homed)), evidenced),
+                streams.active(),
+                unextracted,
+            ),
             "concepts": [concept_view(c) for c in reversed(homed)],
-            "also_taught_here": [
-                concept_view(c)
-                for c in store.concepts_evidenced_in(node.id)
-                if c.id not in homed_ids
-            ],
+            "also_taught_here": [concept_view(c) for c in evidenced if c.id not in homed_ids],
             "links": link_views(node.subject_id, homed_ids),
             "suggestions": [{"id": s.id, "text": s.text} for s in store.node_suggestions(node.id)],
         }
@@ -420,7 +475,8 @@ def create_app(
         then `done` {message_id, stopped, graph_version} or, for a failure
         mid-reply, `error` {status, message, retry_after?, message_id}.
         A failure before the first piece is a plain HTTP error (429 with
-        Retry-After for rate limits); the question stays, waiting for a retry.
+        Retry-After for rate limits, 503 with Retry-After when the model is
+        busy); the question stays, waiting for a retry.
         """
         node = guard(store.get_canvas_node, visitor, node_id)
         if node.kind != "chat":
@@ -505,14 +561,13 @@ def create_app(
                 )
             except LLMError as exc:
                 saved = finish(True)
+                retry_after = getattr(exc, "retry_after", None)
                 yield sse(
                     "error",
                     {
-                        "status": 429 if isinstance(exc, RateLimited) else 502,
+                        "status": error_status(exc),
                         "message": str(exc),
-                        **(
-                            {"retry_after": exc.retry_after} if isinstance(exc, RateLimited) else {}
-                        ),
+                        **({"retry_after": retry_after} if retry_after is not None else {}),
                         "message_id": saved.id if saved else None,
                     },
                 )
