@@ -7,6 +7,7 @@ import { applyTheme, loadTheme, type ThemeChoice } from '../lib/theme'
 const NEXT: Record<ThemeChoice, ThemeChoice> = { system: 'light', light: 'dark', dark: 'system' }
 const LABEL: Record<ThemeChoice, string> = { system: 'Theme: system', light: 'Theme: light', dark: 'Theme: dark' }
 
+/** The slim left rail (maps, new map, theme) and the main area. */
 export function AppShell() {
   const subjects = useQuery({ queryKey: ['subjects'], queryFn: api.listSubjects })
   const [theme, setTheme] = useState<ThemeChoice>(loadTheme)
@@ -14,17 +15,17 @@ export function AppShell() {
 
   return (
     <div className="shell">
-      <nav className="rail" aria-label="Subjects">
+      <nav className="rail" aria-label="Maps">
         <Link to="/" className="brand">
           Doctus
         </Link>
         <Link to="/" className="button rail-new">
-          New subject
+          + New map
         </Link>
         <ul className="rail-list">
           {(subjects.data ?? []).map((s) => (
             <li key={s.id}>
-              <NavLink to={`/s/${s.id}`} className="rail-item">
+              <NavLink to={`/s/${s.id}`} className="rail-item" title={s.title}>
                 {s.title}
               </NavLink>
             </li>

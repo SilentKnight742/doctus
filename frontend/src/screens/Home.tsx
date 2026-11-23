@@ -1,65 +1,77 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { api, describeError } from '../api/client'
+import { useStreams } from '../state/streams-context'
 
+/** Start a new map: a title and the first question (the root chat). */
 export function Home() {
   const qc = useQueryClient()
   const nav = useNavigate()
-  const subjects = useQuery({ queryKey: ['subjects'], queryFn: api.listSubjects })
+  const { ask } = useStreams()
   const [title, setTitle] = useState('')
-  const [goal, setGoal] = useState('')
+  const [question, setQuestion] = useState('')
+  useEffect(() => {
+    document.title = 'Doctus'
+  }, [])
   const create = useMutation({
-    mutationFn: () => api.createSubject(title.trim(), goal.trim()),
+    mutationFn: () => api.createSubject(title.trim(), question.trim()),
     onSuccess: (s) => {
-      qc.invalidateQueries({ queryKey: ['subjects'] })
-      nav(`/s/${s.id}/chat/${s.origin_node_id}`)
+      void qc.invalidateQueries({ queryKey: ['subjects'] })
+      void ask(s.id, s.root_canvas_node_id, null)
+      nav(`/s/${s.id}`)
     },
   })
+  const ready = title.trim() && question.trim()
 
   return (
-    <div className="home page-pad">
-      <section className="card">
-        <h2>Start a subject</h2>
+    <div className="home">
+      <section className="home-card">
+        <h1 className="home-title">What do you want to learn?</h1>
+        <p className="muted">
+          Ask anything. Each question you follow becomes a branch on your map, and the concepts you were taught are
+          collected as you go.
+        </p>
         <form
           className="stack"
           onSubmit={(e) => {
             e.preventDefault()
-            if (title.trim()) create.mutate()
+            if (ready) create.mutate()
           }}
         >
           <label className="field">
-            <span>Subject</span>
-            <input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="German for travel" />
+            <span>Map name</span>
+            <input
+              value={title}
+              maxLength={120}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="German grammar"
+            />
           </label>
           <label className="field">
-            <span>Goal (optional)</span>
-            <textarea value={goal} maxLength={1000} rows={2} onChange={(e) => setGoal(e.target.value)} placeholder="Order food and ask for directions" />
+            <span>First question</span>
+            <textarea
+              value={question}
+              maxLength={8000}
+              rows={3}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  if (ready) create.mutate()
+                }
+              }}
+              placeholder="How do German cases work?"
+            />
           </label>
           <div>
-            <button className="button primary" disabled={!title.trim() || create.isPending}>
-              {create.isPending ? 'Creating…' : 'Start'}
+            <button className="button primary" disabled={!ready || create.isPending}>
+              {create.isPending ? 'Starting…' : 'Start'}
             </button>
           </div>
           {create.error && <p className="error-banner">{describeError(create.error)}</p>}
         </form>
       </section>
-      {(subjects.data?.length ?? 0) > 0 && (
-        <section>
-          <h2>Your subjects</h2>
-          <ul className="subject-list">
-            {subjects.data!.map((s) => (
-              <li key={s.id}>
-                <Link to={`/s/${s.id}`} className="subject-row">
-                  <span className="subject-title">{s.title}</span>
-                  {s.goal && <span className="muted small">{s.goal}</span>}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {subjects.error && <p className="error-banner">{describeError(subjects.error)}</p>}
     </div>
   )
 }

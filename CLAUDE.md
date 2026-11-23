@@ -95,6 +95,18 @@ Every learner message touches two separate layers with separate prompts:
   suggestions, 310 backend tests, one live German session
   (docs/eval/canvas-german-2026-11-22.md). The M2 UI no longer works
   against the backend until M4.
+- 2026-11-23: M3 merged (PR #5). M4 split into two PRs (Apoorv's call):
+  **M4a** `feat/canvas-ui` (backend tweaks: every concept taught per node with
+  a home flag, Gemini 503 as "model busy" with Retry-After; API client and
+  SSE; clockwise layout; canvas with cards; chat and streaming) and **M4b**
+  (editing, keys, context menu, collapse, zoom levels, concept links, panels,
+  search, themes). M4a decisions: slim left rail; indigo accent, provisional
+  in `theme.css`; a concept counts as taught again in a node only with a
+  verified quote there; cards have a fixed max height with "Open" for the
+  full conversation; concept links will be React Flow custom edges; canvas
+  shortcuts fire only when no text field is focused; visible states for
+  unanswered (Answer) and cartographer failed (Retry via /extract); sibling
+  moves animate and the selected node stays in place.
 - Known limit: the tutor on `gemini-3.5-flash-lite` makes small factual slips
   (5 in about 16 replies in testing). A stronger tutor model is planned.
 - Check git for which milestones are actually merged before starting; do not

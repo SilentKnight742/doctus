@@ -15,12 +15,15 @@ export function MessageView({ message, context }: { message: Message; context?: 
   return (
     <div className="msg msg-assistant">
       <Markdown text={message.content} />
-      {context && (
+      {(message.stopped || context) && (
         <div className="msg-tools">
-          <button type="button" className="link-button" onClick={() => setShowCtx((v) => !v)}>
-            {showCtx ? 'Hide context used' : 'Context used'}
-          </button>
-          {showCtx && <ContextUsed ctx={context} />}
+          {message.stopped && <span className="muted">Stopped</span>}
+          {context && (
+            <button type="button" className="link-button" onClick={() => setShowCtx((v) => !v)}>
+              {showCtx ? 'Hide context used' : 'Context used'}
+            </button>
+          )}
+          {showCtx && context && <ContextUsed ctx={context} />}
         </div>
       )}
     </div>

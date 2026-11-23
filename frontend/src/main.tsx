@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
 import { ApiError } from './api/client'
 import { App } from './App'
+import { StreamsProvider } from './state/streams'
 import './theme.css'
 import './app.css'
 
@@ -21,9 +22,11 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <StreamsProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </StreamsProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

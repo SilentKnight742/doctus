@@ -1,29 +1,26 @@
-import type { Brief, ContextUsed as Ctx } from '../api/types'
+import type { ContextUsed as Ctx } from '../api/types'
 
-function names(list: Brief[] | undefined) {
-  return list && list.length ? list.map((b) => b.name).join(', ') : '—'
+function list(items: { title?: string; name?: string }[] | undefined) {
+  return items && items.length ? items.map((b) => b.title || b.name || 'untitled').join(' → ') : '—'
 }
 
 /** Development aid: what background the tutor was given for a reply. */
 export function ContextUsed({ ctx }: { ctx: Ctx }) {
   return (
     <dl className="context-used">
-      <dt>Topic</dt>
-      <dd>{ctx.node?.name ?? '—'}</dd>
+      <dt>Branch</dt>
+      <dd>{list(ctx.branch)}</dd>
+      <dt>Trimmed</dt>
+      <dd>{list(ctx.trimmed_nodes)}</dd>
+      <dt>Concepts</dt>
+      <dd>{ctx.concepts?.map((c) => c.name).join(', ') || '—'}</dd>
       <dt>Prerequisites</dt>
-      <dd>{names(ctx.prerequisites)}</dd>
-      <dt>Part of</dt>
-      <dd>{ctx.part_of?.name ?? '—'}</dd>
-      <dt>Parts</dt>
-      <dd>{names(ctx.parts)}</dd>
-      <dt>Nearby</dt>
-      <dd>{names(ctx.nearby)}</dd>
-      {ctx.recent_turns !== undefined && (
-        <>
-          <dt>Recent turns</dt>
-          <dd>{ctx.recent_turns}</dd>
-        </>
-      )}
+      <dd>{ctx.prerequisites?.map((c) => c.name).join(', ') || '—'}</dd>
+      <dt>History</dt>
+      <dd>
+        {ctx.history_messages ?? '—'} messages
+        {ctx.budget_chars ? `, budget ${ctx.budget_chars} chars` : ''}
+      </dd>
     </dl>
   )
 }
