@@ -91,8 +91,12 @@ Implemented earlier:
   The cartographer can use its own model (`DOCTUS_GRAPH_MODEL`).
 - The cartographer runs after every exchange, in the background, so the
   reply is never delayed. Runs are serialised per subject; messages that
-  arrive during a run get one more run right after it. A failed run (for
-  example a 429) is not retried: the next exchange catches up. Clients poll
+  arrive during a run get one more run right after it. Every run also sweeps
+  the subject for any chat node whose latest reply was never processed, so a
+  node whose own run failed (for example a 429), hit an unexpected error or
+  was lost to a restart is picked up by the next run anywhere in the
+  subject. A failed node is not retried within the same run, and its error
+  stays reported even if later nodes succeed. Clients poll
   `graph_version` and `cartographer: idle | running | error`.
 - Evidence check on every node except the origin; no suggestion or
   frontier nodes.
@@ -101,7 +105,7 @@ Implemented earlier:
 - Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
   and the shortest `path` between two nodes.
 - Trail with `from_node_id`; distance from the origin.
-- 302 backend offline tests; opt-in live Gemini tests. 24 frontend unit
+- 310 backend offline tests; opt-in live Gemini tests. 24 frontend unit
   tests (Vitest).
 
 M2, UI (`frontend/`, merged; superseded by M4): React + TypeScript + Vite,

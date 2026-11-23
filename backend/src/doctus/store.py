@@ -1033,6 +1033,19 @@ class Store:
             out.setdefault(r["canvas_node_id"], []).append(_message(r))
         return out
 
+    def unextracted_chat_nodes(self, subject_id: int) -> list[int]:
+        """Chat nodes with a tutor reply the cartographer has not processed yet."""
+        rows = self._all(
+            """SELECT c.id FROM canvas_nodes c
+               WHERE c.subject_id = ? AND c.kind = 'chat' AND EXISTS (
+                   SELECT 1 FROM messages m
+                   WHERE m.canvas_node_id = c.id AND m.role = 'assistant'
+                     AND m.id > COALESCE(c.last_extracted_message_id, 0))
+               ORDER BY c.id""",
+            (subject_id,),
+        )
+        return [r["id"] for r in rows]
+
     def has_answer(self, canvas_node_id: int) -> bool:
         row = self._one(
             "SELECT 1 FROM messages WHERE canvas_node_id = ? AND role = 'assistant' LIMIT 1",

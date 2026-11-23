@@ -21,6 +21,7 @@ here decides what actually changes:
 messages arrived during a run.
 """
 
+import logging
 import threading
 from dataclasses import dataclass, field
 
@@ -42,6 +43,9 @@ MAX_QUOTES = 2
 MAX_SUGGESTIONS = 3
 SUGGESTION_MAX = 120
 MAX_CONCEPT_NAMES = 150
+MAX_ATTEMPTS_PER_DRAIN = 3  # a safety net against a node that never settles
+
+log = logging.getLogger(__name__)
 
 _MARKDOWN_EMPHASIS = str.maketrans("", "", "*_`")
 
@@ -237,6 +241,9 @@ def apply_extraction(
         summary.title, summary.keyword = title, keyword
 
         for c in result.concepts:
+            if not c.name.strip():
+                summary.dropped.append({"name": c.name, "reason": "empty name", "quotes": []})
+                continue
             good, bad = _verify(c.evidence, messages, summary)
             if not good:
                 reason = "no evidence given" if not c.evidence else "evidence not found in chat"
@@ -286,10 +293,13 @@ class CartographerRunner:
     """Serialises cartographer runs per subject.
 
     `request` marks a chat node as having a new exchange. `drain` (run in the
-    background) processes marked nodes until none are left, so exchanges
-    that arrive during a run are picked up by one more run right after it. A
-    failed run is not retried; the next exchange catches up because
-    `last_extracted_message_id` did not move.
+    background) processes marked nodes, and on every pass also sweeps the
+    database for any chat node in the subject whose latest reply has not been
+    processed. So a node is never left behind because its own run failed
+    (a 429, say), because an unexpected error stopped a run, or because the
+    server restarted and lost the in-memory queue: the next run anywhere in
+    the subject picks it up. A node that fails is not retried within the
+    same drain, and its error stays reported even if later nodes succeed.
     """
 
     def __init__(self, store: Store, llm: LLM):
@@ -315,14 +325,27 @@ class CartographerRunner:
                 return  # the active drain picks up the new request
             self._running.add(subject_id)
         error: str | None = None
+        failed: set[int] = set()
+        attempts: dict[int, int] = {}
         try:
             while True:
                 with self._guard:
                     nodes = self._pending.pop(subject_id, set())
+                # Every answered node still unprocessed, not only the requested ones.
+                nodes |= set(self.store.unextracted_chat_nodes(subject_id))
+                nodes = {
+                    n
+                    for n in nodes
+                    if n not in failed and attempts.get(n, 0) < MAX_ATTEMPTS_PER_DRAIN
+                }
                 if not nodes:
                     break
                 for node_id in sorted(nodes):
-                    error = self._run_node(subject_id, node_id)
+                    attempts[node_id] = attempts.get(node_id, 0) + 1
+                    node_error = self._run_node(subject_id, node_id)
+                    if node_error:
+                        failed.add(node_id)
+                        error = f"Node {node_id}: {node_error}"
         finally:
             with self._guard:
                 self._running.discard(subject_id)
@@ -365,4 +388,8 @@ class CartographerRunner:
             run_once(self.store, self.llm, subject, node)
         except LLMError as exc:
             return str(exc)
+        except Exception as exc:
+            # Never let one node's bug stop the others from being processed.
+            log.exception("Cartographer run failed on canvas node %s", canvas_node_id)
+            return f"Unexpected error: {exc}"
         return None

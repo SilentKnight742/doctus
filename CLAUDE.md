@@ -92,7 +92,7 @@ Every learner message touches two separate layers with separate prompts:
   variables) and replace its screens.
 - 2026-11-22: M3 (`feat/branch-canvas`) in review: canvas tree, migration,
   streamed chat with stop, branch context, cartographer title/keyword/
-  suggestions, 302 backend tests, one live German session
+  suggestions, 310 backend tests, one live German session
   (docs/eval/canvas-german-2026-11-22.md). The M2 UI no longer works
   against the backend until M4.
 - Known limit: the tutor on `gemini-3.5-flash-lite` makes small factual slips
