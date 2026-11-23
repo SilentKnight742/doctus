@@ -157,3 +157,13 @@ def test_context_used_is_sent_with_the_reply(canvas):
         "concepts",
         "prerequisites",
     }
+
+
+def test_tutor_honours_a_requested_amount(canvas):
+    client, llm, _ = canvas
+    _, root = new_subject(client)
+    chat(client, root, "Give me 15 chess traps")
+    system = calls(llm, "chat")[0]["system"]
+    assert 'asks for a specific amount ("15 traps"' in system
+    assert "give exactly that many" in system
+    assert "never argue the learner out of the request" in system
