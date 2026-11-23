@@ -1,28 +1,30 @@
-"""Cartographer (evidence, relations, edge rules, background runs) and tutor split."""
+"""Cartographer: evidence per canvas node, concept dedupe across nodes,
+links, title/keyword, suggestions, the concept-name cap, background runs.
+Plus the M1/M2 concept endpoints that stay (graph, concept detail, visit)."""
 
 import threading
 
 import pytest
-from fastapi.testclient import TestClient
 
-from doctus.api import create_app
-from doctus.cartographer import apply_extraction, find_quote, normalise
-from doctus.config import Settings
+from conftest import V1, V2, calls, canvas_of, chat, child, concept, extraction, make_client
+from conftest import new_subject as api_subject
+from doctus.cartographer import (
+    MAX_CONCEPT_NAMES,
+    apply_extraction,
+    build_prompt,
+    concept_names,
+    extraction_window,
+    find_quote,
+    normalise,
+)
 from doctus.graph import distances_from
 from doctus.llm import FakeLLM
-from doctus.mastery import PlaceholderDecayModel
-from doctus.prompts import CARTOGRAPHER_SYSTEM, Extraction
+from doctus.prompts import CanvasExtraction
 from doctus.store import Store
-
-V1 = {"X-Doctus-Visitor": "visitor-one-0000000"}
-V2 = {"X-Doctus-Visitor": "visitor-two-0000000"}
 
 TUTOR_LINE = (
     "With Wechselpräpositionen, use the dative when nothing moves: Das Buch liegt auf dem Tisch."
 )
-
-
-# ---------- fixtures and helpers ----------
 
 
 @pytest.fixture
@@ -32,129 +34,74 @@ def store():
     s.close()
 
 
-def _settings():
-    return Settings(
-        db_path=":memory:",
-        llm_provider="fake",
-        gemini_api_key=None,
-        gemini_model="x",
-        max_proposals_per_update=5,
-        recent_turns_in_context=8,
-    )
-
-
-def _app(llm, store=None):
-    store = store or Store(":memory:")
-    app = create_app(store=store, llm=llm, mastery=PlaceholderDecayModel(), settings=_settings())
-    return TestClient(app), store
-
-
-@pytest.fixture
-def env():
-    llm = FakeLLM()
-    client, store = _app(llm)
-    return client, llm, store
-
-
 def _subject(store, title="German"):
     s = store.create_subject("v1", title, "Wechselpräpositionen")
-    return s, store.node_by_id(s["origin_node_id"])
+    return s, store.canvas_node_by_id(s["root_canvas_node_id"])
 
 
-def _chat(store, s, node, *pairs):
+def _exchange(store, node, *pairs):
     msgs = []
     for user, tutor in pairs:
-        msgs.append(store.add_message(s["id"], node.id, "user", user))
-        msgs.append(store.add_message(s["id"], node.id, "assistant", tutor))
+        msgs.append(store.add_canvas_message(node.id, "user", user))
+        msgs.append(store.add_canvas_message(node.id, "assistant", tutor))
     return msgs
 
 
-def _apply(store, s, node, msgs, **result):
-    return apply_extraction(store, s, node, Extraction.model_validate(result), msgs)
+def _apply(store, s, node, msgs, **fields):
+    result = CanvasExtraction.model_validate(extraction(**fields))
+    return apply_extraction(store, s, store.canvas_node_by_id(node.id), result, msgs)
 
 
-def _concept(name, quote, attach_to="German", relation="related", reason="r"):
-    return {
-        "name": name,
-        "summary": f"about {name}",
-        "evidence": [quote] if quote else [],
-        "link": {"attach_to": attach_to, "relation": relation, "reason": reason},
-    }
+def _link(source, target, kind="prerequisite", reason="r"):
+    return {"source": source, "target": target, "kind": kind, "reason": reason}
 
 
-def _calls(llm, kind):
-    return [c for c in llm.calls if c["kind"] == kind]
+# ---------- evidence ----------
 
 
-def _new_subject(client, title="German"):
-    subj = client.post(
-        "/api/subjects", json={"title": title, "goal": "Wechselpräpositionen"}, headers=V1
-    ).json()
-    return subj, subj["origin_node_id"]
-
-
-def _chat_api(client, node_id, message, **extra):
-    return client.post(f"/api/nodes/{node_id}/chat", json={"message": message, **extra}, headers=V1)
-
-
-# ---------- evidence verification ----------
-
-
-def test_quote_found_exactly(store):
-    s, origin = _subject(store)
-    m = store.add_message(s["id"], origin.id, "assistant", TUTOR_LINE)
+def test_quote_matching_ignores_whitespace_case_and_markdown(store):
+    _s, root = _subject(store)
+    (m,) = [store.add_canvas_message(root.id, "assistant", TUTOR_LINE)]
     assert find_quote("use the dative when nothing moves", [m]) is m
-
-
-def test_quote_matches_despite_whitespace_and_case(store):
-    s, origin = _subject(store)
-    m = store.add_message(s["id"], origin.id, "assistant", TUTOR_LINE)
     assert find_quote("  USE the   dative\nwhen nothing MOVES ", [m]) is m
     assert normalise(" A \n b ") == "a b"
-
-
-def test_quote_matches_despite_markdown_emphasis(store):
-    s, origin = _subject(store)
-    m = store.add_message(
-        s["id"],
-        origin.id,
-        "assistant",
-        "It answers ***Wohin?*** so we need the **Accusative** case, e.g. `ins` Kino.",
+    md = store.add_canvas_message(
+        root.id, "assistant", "It answers ***Wohin?*** so we need the **Accusative** case."
     )
-    assert find_quote("It answers Wohin? so we need the Accusative case, e.g. ins Kino.", [m]) is m
-    assert find_quote("It answers Wo? so we need the Accusative case", [m]) is None
+    assert find_quote("It answers Wohin? so we need the Accusative case", [md]) is md
+    assert find_quote("It answers Wo? so we need the Accusative case", [md]) is None
 
 
-def test_no_node_without_verified_evidence(store):
-    s, origin = _subject(store)
-    msgs = _chat(store, s, origin, ("When do I use dative?", TUTOR_LINE))
+def test_no_concept_without_verified_evidence(store):
+    s, root = _subject(store)
+    msgs = _exchange(store, root, ("When do I use dative?", TUTOR_LINE))
     summary = _apply(
         store,
         s,
-        origin,
+        root,
         msgs,
         concepts=[
-            _concept("Dativ for position", "the dative marks static location in all cases"),
-            _concept("No quotes at all", None),
+            concept("Dativ for position", "the dative marks static location in all cases"),
+            concept("No quotes at all", None),
         ],
     )
-    assert [n.name for n in store.list_nodes(s["id"])] == ["German"]
-    assert [d["name"] for d in summary.dropped] == ["Dativ for position", "No quotes at all"]
-    assert [d["reason"] for d in summary.dropped] == [
-        "evidence not found in chat",
-        "no evidence given",
+    assert store.list_nodes(s["id"]) == []
+    assert [(d["name"], d["reason"]) for d in summary.dropped] == [
+        ("Dativ for position", "evidence not found in chat"),
+        ("No quotes at all", "no evidence given"),
     ]
     assert (summary.evidence_verified, summary.evidence_dropped) == (0, 1)
     assert not summary.changed
 
 
 def test_one_good_quote_is_enough_and_is_stored(store):
-    s, origin = _subject(store)
-    msgs = _chat(store, s, origin, ("When do I use dative?", TUTOR_LINE))
-    concept = _concept("Dativ for position", "Das Buch liegt auf dem Tisch.", relation="part_of")
-    concept["evidence"].insert(0, "made up")
-    summary = _apply(store, s, origin, msgs, concepts=[concept])
+    s, root = _subject(store)
+    msgs = _exchange(store, root, ("When do I use dative?", TUTOR_LINE))
+    c = concept("Dativ for position", "Das Buch liegt auf dem Tisch.")
+    c["evidence"].insert(0, "made up")
+    summary = _apply(store, s, root, msgs, concepts=[c])
     node = store.find_node_by_name(s["id"], "Dativ for position")
+    assert node.home_canvas_node_id == root.id
     assert [(e.quote, e.message_id) for e in store.list_evidence(node.id)] == [
         ("Das Buch liegt auf dem Tisch.", msgs[1].id)
     ]
@@ -162,241 +109,232 @@ def test_one_good_quote_is_enough_and_is_stored(store):
     assert (summary.evidence_verified, summary.evidence_dropped) == (1, 1)
 
 
-def test_current_topic_evidence_is_recorded(store):
-    s, origin = _subject(store)
-    msgs = _chat(store, s, origin, ("Explain", TUTOR_LINE))
-    _apply(store, s, origin, msgs, current_node_evidence=["nothing moves"])
-    assert [e.quote for e in store.list_evidence(origin.id)] == ["nothing moves"]
+def test_evidence_must_come_from_this_canvas_node(store):
+    s, root = _subject(store)
+    _exchange(store, root, ("dative?", TUTOR_LINE))
+    a = store.add_canvas_node("v1", root.id, "child", "chat", "accusative?")
+    store.add_canvas_message(a.id, "assistant", "The accusative is for movement.")
+    context, new = extraction_window(store, store.canvas_node_by_id(a.id))
+    assert all(m.canvas_node_id == a.id for m in context + new)
+    summary = _apply(
+        store, s, a, context + new, concepts=[concept("Dative", "use the dative when nothing")]
+    )
+    assert summary.dropped[0]["reason"] == "evidence not found in chat"
+    assert store.find_node_by_name(s["id"], "Dative") is None
 
 
-def test_existing_concept_is_reinforced_not_duplicated(store):
-    s, origin = _subject(store)
-    msgs = _chat(store, s, origin, ("q", TUTOR_LINE))
-    _apply(store, s, origin, msgs, concepts=[_concept("Dativ", "nothing moves")])
-    summary = _apply(store, s, origin, msgs, concepts=[_concept("dativ ", "Das Buch liegt")])
+def test_concepts_dedupe_across_nodes_and_keep_their_first_home(store):
+    s, root = _subject(store)
+    msgs = _exchange(store, root, ("q", TUTOR_LINE))
+    _apply(store, s, root, msgs, concepts=[concept("Dativ", "nothing moves")])
+    a = store.add_canvas_node("v1", root.id, "child", "chat", "more")
+    a_msgs = _exchange(store, a, ("again?", "Again: the Dativ means nothing moves."))
+    summary = _apply(store, s, a, a_msgs, concepts=[concept("  dativ ", "the Dativ means")])
+    (node,) = store.list_nodes(s["id"])
     assert summary.reinforced == ["Dativ"] and summary.added == []
-    assert len(store.list_evidence(store.find_node_by_name(s["id"], "Dativ").id)) == 2
+    assert node.home_canvas_node_id == root.id
+    assert [e.quote for e in store.list_evidence(node.id)] == ["nothing moves", "the Dativ means"]
 
 
-# ---------- relations and edge rules ----------
+# ---------- links ----------
 
 
-@pytest.mark.parametrize(
-    ("relation", "expected"),
-    [
-        ("prerequisite_of", ("Dativ", "German", "prerequisite")),
-        ("builds_on", ("German", "Dativ", "prerequisite")),
-        ("part_of", ("Dativ", "German", "part_of")),
-        ("contains", ("German", "Dativ", "part_of")),
-        ("related", ("Dativ", "German", "related")),
-    ],
-)
-def test_each_relation_maps_to_the_stored_direction(store, relation, expected):
-    s, origin = _subject(store)
-    msgs = _chat(store, s, origin, ("q", TUTOR_LINE))
-    _apply(store, s, origin, msgs, concepts=[_concept("Dativ", "nothing moves", relation=relation)])
-    names = {n.id: n.name for n in store.list_nodes(s["id"])}
-    (edge,) = store.list_edges(s["id"])
-    assert (names[edge.from_id], names[edge.to_id], edge.kind) == expected
-
-
-def test_attach_to_another_concept_in_the_same_answer(store):
-    s, origin = _subject(store)
-    msgs = _chat(store, s, origin, ("q", "Kanto starters: Bulbasaur, Charmander, Squirtle."))
-    _apply(
+def test_links_between_new_and_existing_concepts(store):
+    s, root = _subject(store)
+    msgs = _exchange(store, root, ("q", "Cases mark roles. The dative marks the indirect object."))
+    summary = _apply(
         store,
         s,
-        origin,
+        root,
         msgs,
-        concepts=[
-            # listed before its whole: order must not matter
-            _concept("Bulbasaur line", "Bulbasaur", attach_to="Kanto starters", relation="part_of"),
-            _concept("Kanto starters", "Kanto starters:", relation="part_of"),
+        concepts=[concept("Cases", "Cases mark roles"), concept("Dative", "dative marks")],
+        links=[_link("Cases", "Dative"), _link("Dative", "Cases", "related")],
+    )
+    edges = {(e.from_id, e.to_id, e.kind) for e in store.list_edges(s["id"])}
+    cases = store.find_node_by_name(s["id"], "Cases").id
+    dative = store.find_node_by_name(s["id"], "Dative").id
+    assert edges == {(cases, dative, "prerequisite"), (dative, cases, "related")}
+    assert len(summary.edges_added) == 2
+
+
+def test_bad_links_are_skipped_with_reasons(store):
+    s, root = _subject(store)
+    msgs = _exchange(store, root, ("q", "A comes first. B builds on A."))
+    summary = _apply(
+        store,
+        s,
+        root,
+        msgs,
+        concepts=[concept("A", "A comes first"), concept("B", "B builds on A")],
+        links=[
+            _link("A", "B"),
+            _link("A", "B"),  # duplicate
+            _link("B", "A"),  # cycle
+            _link("A", "a"),  # self
+            _link("A", "Unknown"),
         ],
     )
-    bulba = store.find_node_by_name(s["id"], "Bulbasaur line")
-    kanto = store.find_node_by_name(s["id"], "Kanto starters")
-    assert store.part_of_parent(bulba.id).id == kanto.id
-    assert store.part_of_parent(kanto.id).id == origin.id
+    assert [s_["reason"] for s_ in summary.skipped] == [
+        "duplicate",
+        "prerequisite cycle",
+        "self-link",
+        "unknown concept",
+    ]
+    assert len(store.list_edges(s["id"])) == 1
 
 
-def test_unknown_attach_to_falls_back_to_related_on_current_node(store):
-    s, origin = _subject(store)
-    msgs = _chat(store, s, origin, ("q", TUTOR_LINE))
+def test_part_of_is_not_in_the_schema():
+    with pytest.raises(ValueError):
+        CanvasExtraction.model_validate(
+            extraction(links=[{"source": "a", "target": "b", "kind": "part_of"}])
+        )
+    assert "part_of" not in CanvasExtraction.model_json_schema().__repr__()
+
+
+# ---------- title, keyword, suggestions ----------
+
+
+def test_title_set_from_first_exchange_then_kept(store):
+    s, root = _subject(store)
+    msgs = _exchange(store, root, ("q", "a"))
+    summary = _apply(store, s, root, msgs, title="  German   noun cases ", keyword="cases, nouns")
+    node = store.canvas_node_by_id(root.id)
+    assert (node.title, node.keyword) == ("German noun cases", "cases")
+    assert summary.title_changed and summary.changed
+    again = _apply(store, s, root, msgs, title="German noun cases", keyword="cases")
+    assert not again.title_changed and not again.changed
+    empty = _apply(store, s, root, msgs, title="", keyword="")  # model forgot: keep it
+    assert store.canvas_node_by_id(root.id).title == "German noun cases"
+    assert not empty.title_changed
+    long = _apply(store, s, root, msgs, title="x" * 100)
+    assert len(store.canvas_node_by_id(root.id).title) == 60 and long.title_changed
+
+
+def test_prompt_shows_the_current_title_or_asks_for_one(store):
+    s, root = _subject(store)
+    msgs = _exchange(store, root, ("q", "a"))
+    prompt = build_prompt(store, s, root, [], msgs)
+    assert "Current title: (none yet: set it from this exchange)" in prompt
+    assert "Path to this conversation: (this is the start)" in prompt
+    store.set_title_keyword(root.id, "German cases", "cases")
+    a = store.add_canvas_node("v1", root.id, "child", "chat", "dative?")
+    store.set_title_keyword(a.id, "Dative", "dative")
+    prompt = build_prompt(store, s, store.canvas_node_by_id(root.id), [], msgs)
+    assert "Current title: German cases (keyword: cases)" in prompt
+    assert "Branches the learner already took from here: Dative" in prompt
+    child_prompt = build_prompt(store, s, store.canvas_node_by_id(a.id), [], msgs)
+    assert "Path to this conversation: German cases" in child_prompt
+
+
+def test_suggestions_are_capped_deduped_and_skip_taken_branches(store):
+    s, root = _subject(store)
+    store.add_canvas_node("v1", root.id, "child", "chat", "What is the dative?")
+    msgs = _exchange(store, root, ("q", "a"))
     summary = _apply(
         store,
         s,
-        origin,
+        root,
         msgs,
-        concepts=[_concept("Dativ", "nothing moves", attach_to="Not a node", relation="part_of")],
+        suggestions=[
+            "what is the  dative?",  # already a branch
+            "How do articles change?",
+            "how do articles change?",  # duplicate
+            "x" * 121,  # too long
+            "",
+            "Which prepositions take the dative?",
+            "Why four cases?",
+            "A fourth one?",
+        ],
     )
-    (edge,) = store.list_edges(s["id"])
-    assert edge.kind == "related"
-    assert {edge.from_id, edge.to_id} == {origin.id, store.find_node_by_name(s["id"], "Dativ").id}
-    assert summary.fallbacks == [{"name": "Dativ", "attach_to": "Not a node"}]
-
-
-def test_single_part_of_parent_keeps_the_first(store):
-    s, origin = _subject(store)
-    whole2 = store.insert_node(s["id"], "Grammar", "")
-    msgs = _chat(store, s, origin, ("q", TUTOR_LINE))
-    _apply(
-        store, s, origin, msgs, concepts=[_concept("Dativ", "nothing moves", relation="part_of")]
-    )
-    summary = _apply(
-        store,
-        s,
-        origin,
-        msgs,
-        concepts=[_concept("Dativ", "Das Buch liegt", attach_to="Grammar", relation="part_of")],
-    )
-    dativ = store.find_node_by_name(s["id"], "Dativ")
-    assert store.part_of_parent(dativ.id).id == origin.id
-    assert summary.skipped == [
-        {"item": "Dativ -> Grammar (part_of)", "reason": "second part_of parent"}
+    texts = [x.text for x in store.node_suggestions(root.id)]
+    assert texts == [
+        "How do articles change?",
+        "Which prepositions take the dative?",
+        "Why four cases?",
     ]
-    assert whole2.id not in {e.to_id for e in store.list_edges(s["id"])}
+    assert summary.suggestions_changed
+    replaced = _apply(store, s, root, msgs, suggestions=["Only this one?"])
+    assert [x.text for x in store.node_suggestions(root.id)] == ["Only this one?"]
+    assert replaced.suggestions_changed
 
 
-def test_cycle_checks_are_per_kind(store):
-    s, _ = _subject(store)
-    a = store.insert_node(s["id"], "A", "")
-    b = store.insert_node(s["id"], "B", "")
-    c = store.insert_node(s["id"], "C", "")
-    store.insert_edge(s["id"], a.id, b.id, "prerequisite", "")
-    store.insert_edge(s["id"], b.id, c.id, "prerequisite", "")
-    with pytest.raises(Exception, match="prerequisite cycle"):
-        store.insert_edge(s["id"], c.id, a.id, "prerequisite", "")
-    # part_of has its own cycle check...
-    store.insert_edge(s["id"], a.id, b.id, "part_of", "")
-    with pytest.raises(Exception, match="part_of cycle"):
-        store.insert_edge(s["id"], b.id, a.id, "part_of", "")
-    # ...and edges of one kind never block another kind
-    store.insert_edge(s["id"], c.id, a.id, "part_of", "")
-    store.insert_edge(s["id"], b.id, a.id, "related", "")
-    assert sorted(e.kind for e in store.list_edges(s["id"])) == [
-        "part_of",
-        "part_of",
-        "prerequisite",
-        "prerequisite",
-        "related",
-    ]
+# ---------- concept names sent to the model ----------
 
 
-def test_duplicates_and_cycles_are_skipped_in_a_run(store):
-    s, origin = _subject(store)
-    x = store.insert_node(s["id"], "X", "")
-    store.insert_edge(s["id"], origin.id, x.id, "prerequisite", "")
-    msgs = _chat(store, s, origin, ("q", "X is taught here in full."))
-    summary = _apply(
-        store, s, origin, msgs, concepts=[_concept("X", "X is taught", relation="prerequisite_of")]
-    )
-    assert summary.skipped == [
-        {"item": "X -> German (prerequisite)", "reason": "prerequisite cycle"}
-    ]
-    summary = _apply(
-        store, s, origin, msgs, concepts=[_concept("X", "X is taught", relation="builds_on")]
-    )
-    assert summary.skipped == [{"item": "German -> X (prerequisite)", "reason": "duplicate"}]
+def test_concept_names_are_capped_branch_first_most_recent_first(store):
+    s, root = _subject(store)
+    a = store.add_canvas_node("v1", root.id, "child", "chat", "a")
+    b = store.add_canvas_node("v1", root.id, "child", "chat", "b")  # sibling of a
+    for i in range(MAX_CONCEPT_NAMES + 20):
+        store.insert_node(s["id"], f"Other {i}", "", home_canvas_node_id=b.id)
+    store.insert_node(s["id"], "Root old", "", home_canvas_node_id=root.id)
+    store.insert_node(s["id"], "On branch new", "", home_canvas_node_id=a.id)
+    names = concept_names(store, s["id"], [n.id for n in store.branch(a.id)])
+    assert len(names) == MAX_CONCEPT_NAMES
+    assert names[:2] == ["On branch new", "Root old"]
+    assert names[2] == f"Other {MAX_CONCEPT_NAMES + 19}"  # then the rest, newest first
 
 
-# ---------- tutor and cartographer are separate ----------
+# ---------- window and runs ----------
 
 
-def test_tutor_and_cartographer_are_separate_calls(env):
-    client, llm, _ = env
-    _, origin_id = _new_subject(client)
-    assert _chat_api(client, origin_id, "Teach me Wechselpräpositionen").status_code == 200
-    assert [c["kind"] for c in llm.calls] == ["chat", "json"]
-    tutor_sys, carto_sys = llm.calls[0]["system"], llm.calls[1]["system"]
-    assert carto_sys == CARTOGRAPHER_SYSTEM
-    for word in ("evidence", "concepts", "attach_to", "cartographer"):
-        assert word not in tutor_sys
-    assert "Never mention these" in tutor_sys
+def test_window_ends_at_the_latest_reply(store):
+    _s, root = _subject(store)
+    assert extraction_window(store, root) == ([], [])
+    store.add_canvas_message(root.id, "user", "waiting")
+    assert extraction_window(store, store.canvas_node_by_id(root.id)) == ([], [])
+    store.add_canvas_message(root.id, "assistant", "answer")
+    store.add_canvas_message(root.id, "user", "follow-up not answered yet")
+    _ctx, new = extraction_window(store, store.canvas_node_by_id(root.id))
+    assert [m.content for m in new] == ["waiting", "answer"]
 
 
-def test_origin_and_topic_scopes(env):
-    client, llm, store = env
-    subj, origin_id = _new_subject(client)
-    topic = store.insert_node(subj["id"], "Dativ", "")
-    _chat_api(client, origin_id, "all of it")
-    _chat_api(client, topic.id, "this one")
-    origin_sys, topic_sys = (c["system"] for c in _calls(llm, "chat"))
-    assert "Do not force an overview" in origin_sys and "Keep the focus" not in origin_sys
-    assert "Keep the focus" in topic_sys and "Do not force an overview" not in topic_sys
-
-
-def test_tutor_notes_show_neighbourhood_without_strength(env):
-    client, llm, store = env
-    subj, origin_id = _new_subject(client)
-    sid = subj["id"]
-    topic = store.insert_node(sid, "Dativ", "Static location.")
-    pre = store.insert_node(sid, "Cases", "Nominative to dative.")
-    part = store.insert_node(sid, "Wo questions", "")
-    store.insert_edge(sid, topic.id, origin_id, "part_of", "")
-    store.insert_edge(sid, pre.id, topic.id, "prerequisite", "")
-    store.insert_edge(sid, part.id, topic.id, "part_of", "")
-    for i in range(12):
-        n = store.insert_node(sid, f"Near {i}", "")
-        store.insert_edge(sid, topic.id, n.id, "related", "")
-    used = _chat_api(client, topic.id, "hi").json()["context_used"]
-    assert [p["name"] for p in used["prerequisites"]] == ["Cases"]
-    assert used["part_of"]["name"] == "German"
-    assert [p["name"] for p in used["parts"]] == ["Wo questions"]
-    assert [n["name"] for n in used["nearby"]] == [f"Near {i}" for i in range(10)]
-    notes = _calls(llm, "chat")[-1]["system"]
-    assert "Part of: German" in notes and "- Cases: Nominative to dative." in notes
-    assert "Near 9" in notes and "Near 10" not in notes
-    assert "strength" not in notes.split("Private notes:")[1].split("\n\n", 1)[1]
-    assert "untested" not in notes
-
-
-# ---------- background runs ----------
-
-
-def test_cartographer_runs_after_every_exchange_and_bumps_version(env):
-    client, llm, store = env
-    subj, origin_id = _new_subject(client)
+def test_cartographer_runs_after_every_exchange_and_bumps_version(canvas):
+    client, llm, store = canvas
+    s, root = api_subject(client)
     llm.queue_chat("The dative is for location: nothing moves.")
-    llm.queue_json(
-        {
-            "concepts": [
-                _concept("Dativ", "for location: nothing moves", relation="part_of"),
-            ]
-        }
-    )
-    res = _chat_api(client, origin_id, "dative?").json()
-    assert res["cartographer"] == "running"  # status at response time
-    status = client.get(f"/api/subjects/{subj['id']}/graph/status", headers=V1).json()
-    assert status == {"graph_version": 1, "cartographer": "idle", "error": None}
+    llm.queue_json(extraction(concepts=[concept("Dativ", "for location: nothing moves")]))
+    chat(client, root, "dative?")
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
+    assert status["cartographer"] == "idle" and status["error"] is None
+    version = status["graph_version"]
 
-    _chat_api(client, origin_id, "thanks")  # canned empty extraction: nothing changes
-    assert len(_calls(llm, "json")) == 2
-    status = client.get(f"/api/subjects/{subj['id']}/graph/status", headers=V1).json()
-    assert status["graph_version"] == 1
-    assert store.node_by_id(origin_id).last_extracted_message_id == (
-        store.node_messages(origin_id)[-1].id
+    chat(client, root, "thanks")  # canned empty extraction: no graph change from the run
+    assert len(calls(llm, "json")) == 2
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
+    assert status["graph_version"] == version + 2  # the two new messages only
+    assert store.canvas_node_by_id(root).last_extracted_message_id == (
+        store.canvas_messages(root)[-1].id
     )
 
 
-def test_cartographer_failure_does_not_break_chat_and_next_exchange_catches_up(env):
-    client, llm, store = env
-    subj, origin_id = _new_subject(client)
+def test_failure_does_not_break_chat_and_the_next_exchange_catches_up(canvas):
+    client, llm, store = canvas
+    s, root = api_subject(client)
     llm.queue_json("garbage")
     llm.queue_json("garbage")  # the one retry also fails
-    res = _chat_api(client, origin_id, "first")
-    assert res.status_code == 200 and res.json()["reply"]
-    status = client.get(f"/api/subjects/{subj['id']}/graph/status", headers=V1).json()
-    assert status["cartographer"] == "error" and "invalid" in status["error"]
-    assert store.node_by_id(origin_id).last_extracted_message_id is None
-    assert len(_calls(llm, "json")) == 2  # no retry loop
-
-    _chat_api(client, origin_id, "second")
-    prompt = _calls(llm, "json")[-1]["prompt"]
-    assert "user: first" in prompt and "user: second" in prompt
-    assert "[context]" not in prompt
-    status = client.get(f"/api/subjects/{subj['id']}/graph/status", headers=V1).json()
+    assert chat(client, root, "first").status_code == 200
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
+    assert status["cartographer"] == "error" and "invalid CanvasExtraction" in status["error"]
+    assert store.canvas_node_by_id(root).last_extracted_message_id is None
+    chat(client, root, "second")
+    prompt = calls(llm, "json")[-1]["prompt"]
+    assert "user: first" in prompt and "user: second" in prompt and "[context]" not in prompt
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
     assert status["cartographer"] == "idle" and status["error"] is None
+
+
+def test_node_deleted_before_its_run_is_skipped(canvas):
+    client, llm, store = canvas
+    s, root = api_subject(client)
+    a = child(client, root, "A?").json()
+    store.add_canvas_message(a["id"], "assistant", "answer")
+    runner = client.app.state.cartographer
+    runner.request(s["id"], a["id"])
+    client.delete(f"/api/canvas-nodes/{a['id']}", headers=V1)
+    runner.drain(s["id"])
+    assert calls(llm, "json") == []
+    assert store.graph_status(s["id"])["cartographer"] == "idle"
 
 
 class BlockingLLM(FakeLLM):
@@ -407,8 +345,7 @@ class BlockingLLM(FakeLLM):
         self.started = threading.Event()
         self.release = threading.Event()
         self._blocked = False
-
-    json_started = 0
+        self.json_started = 0
 
     def _raw_json(self, system, prompt, schema):
         self.json_started += 1
@@ -419,38 +356,32 @@ class BlockingLLM(FakeLLM):
         return super()._raw_json(system, prompt, schema)
 
 
-def test_chat_during_cartographer_run_and_rerun_after_mid_run_messages():
+def test_chat_during_a_run_and_rerun_after_mid_run_messages():
     llm = BlockingLLM()
-    client, store = _app(llm)
-    subj, origin_id = _new_subject(client)
-    first: list = []
-    worker = threading.Thread(target=lambda: first.append(_chat_api(client, origin_id, "m1")))
-    worker.start()
+    client, _, store = make_client(llm=llm, sync=False)
+    s, root = api_subject(client)
+    assert chat(client, root, "m1").status_code == 200
     try:
         assert llm.started.wait(10)
-        status = client.get(f"/api/subjects/{subj['id']}/graph/status", headers=V1).json()
+        status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
         assert status["cartographer"] == "running"
-
-        # Chat works while the run is blocked mid-call.
-        second = _chat_api(client, origin_id, "m2")
-        assert second.status_code == 200
-        # m2's run did not start a second model call: it waits for the active run.
-        assert llm.json_started == 1
+        assert chat(client, root, "m2").status_code == 200  # chat works mid-run
+        assert llm.json_started == 1  # m2 waits for the active run
     finally:
         llm.release.set()
-        worker.join(10)
-    assert first[0].status_code == 200
-
-    # The run picked up m2 right after it finished: a second call, m2 new, m1 as context.
-    calls = _calls(llm, "json")
-    assert len(calls) == 2
-    assert "user: m1" in calls[0]["prompt"] and "m2" not in calls[0]["prompt"]
-    assert "[context] user: m1" in calls[1]["prompt"] and "\nuser: m2" in calls[1]["prompt"]
-    assert store.node_by_id(origin_id).last_extracted_message_id == (
-        store.node_messages(origin_id)[-1].id
+    for _ in range(500):
+        status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
+        if status["cartographer"] == "idle" and len(calls(llm, "json")) == 2:
+            break
+        threading.Event().wait(0.01)
+    json_calls = calls(llm, "json")
+    assert len(json_calls) == 2
+    assert "user: m1" in json_calls[0]["prompt"] and "m2" not in json_calls[0]["prompt"]
+    assert "[context] user: m1" in json_calls[1]["prompt"]
+    assert "\nuser: m2" in json_calls[1]["prompt"]
+    assert store.canvas_node_by_id(root).last_extracted_message_id == (
+        store.canvas_messages(root)[-1].id
     )
-    status = client.get(f"/api/subjects/{subj['id']}/graph/status", headers=V1).json()
-    assert status["cartographer"] == "idle"
 
 
 def test_startup_resets_running_state(tmp_path):
@@ -465,121 +396,68 @@ def test_startup_resets_running_state(tmp_path):
     s.close()
 
 
-def test_manual_extract_uses_the_same_lock(env):
-    client, _llm, store = env
-    subj, origin_id = _new_subject(client)
-    assert client.post(f"/api/nodes/{origin_id}/extract", headers=V1).status_code == 409
-    store.add_message(subj["id"], origin_id, "user", "hello")
+def test_manual_extract_uses_the_same_lock(canvas):
+    client, _llm, store = canvas
+    s, root = api_subject(client)
+    url = f"/api/canvas-nodes/{root}/extract"
+    assert client.post(url, headers=V1).status_code == 409
+    store.add_canvas_message(root, "user", "hello")
+    store.add_canvas_message(root, "assistant", "hi")
     runner = client.app.state.cartographer
-    runner._running.add(subj["id"])  # a background run is in progress
-    res = client.post(f"/api/nodes/{origin_id}/extract", headers=V1)
+    runner._running.add(s["id"])  # a background run is in progress
+    res = client.post(url, headers=V1)
     assert res.status_code == 409 and "already running" in res.json()["detail"]
-    runner._running.discard(subj["id"])
-    assert client.post(f"/api/nodes/{origin_id}/extract", headers=V1).status_code == 200
-    assert client.post(f"/api/nodes/{origin_id}/extract", headers=V1).status_code == 409
+    runner._running.discard(s["id"])
+    assert client.post(url, headers=V1).status_code == 200
+    assert client.post(url, headers=V1).status_code == 409
+    assert client.post(url, headers=V2).status_code == 404
 
 
-# ---------- API shape and scoping ----------
+def test_title_and_suggestions_reach_the_canvas(canvas):
+    client, llm, _ = canvas
+    s, root = api_subject(client)
+    llm.queue_json(extraction(title="Greetings", keyword="hallo", suggestions=["How formal?"]))
+    chat(client, root, "Hallo")
+    view = canvas_of(client, s["id"])
+    assert (view["nodes"][0]["title"], view["nodes"][0]["keyword"]) == ("Greetings", "hallo")
+    assert [x["text"] for x in view["suggestions"]] == ["How formal?"]
 
 
-def test_new_subject_starts_with_only_the_origin(env):
-    client, *_ = env
-    subj, origin_id = _new_subject(client)
-    graph = client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()
-    (node,) = graph["nodes"]
-    assert (node["id"], node["name"], node["distance"]) == (origin_id, "German", 0)
-    assert "status" not in node
-    assert graph["graph_version"] == 0 and graph["cartographer"] == "idle"
+# ---------- M1/M2 concept endpoints that stay ----------
 
 
-def test_dismiss_endpoint_is_gone(env):
-    client, *_ = env
-    _, origin_id = _new_subject(client)
-    assert client.post(f"/api/nodes/{origin_id}/dismiss", headers=V1).status_code in (404, 405)
-
-
-def test_trail_records_from_node_id_and_ignores_self(env):
-    client, _, store = env
-    subj, origin_id = _new_subject(client)
-    other = store.insert_node(subj["id"], "Dativ", "")
-    _chat_api(client, origin_id, "a", from_node_id=origin_id)  # self: no from
-    _chat_api(client, origin_id, "b")  # same node: no step
-    _chat_api(client, other.id, "c", from_node_id=origin_id)
-    graph = client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()
-    assert [(t["node_id"], t["from_node_id"]) for t in graph["trail"]] == [
-        (origin_id, None),
-        (other.id, origin_id),
-    ]
-    assert graph["edges"] == []  # trail steps are never edges
-
-
-def _trail(client, subject_id):
-    graph = client.get(f"/api/subjects/{subject_id}/graph", headers=V1).json()
-    return [(t["node_id"], t["from_node_id"]) for t in graph["trail"]]
-
-
-def test_visit_records_trail_with_from_node_id(env):
-    client, _, store = env
-    subj, origin_id = _new_subject(client)
-    other = store.insert_node(subj["id"], "Dativ", "")
-    res = client.post(f"/api/nodes/{origin_id}/visit", headers=V1)
-    assert res.status_code == 200 and res.json()["recorded"] is True
-    res = client.post(f"/api/nodes/{other.id}/visit", json={"from_node_id": origin_id}, headers=V1)
-    assert res.json()["recorded"] is True
-    assert res.json()["trail"][-1]["from_node_id"] == origin_id
-    assert _trail(client, subj["id"]) == [(origin_id, None), (other.id, origin_id)]
-
-
-def test_visit_dedupes_and_ignores_self(env):
-    client, *_ = env
-    subj, origin_id = _new_subject(client)
-    url = f"/api/nodes/{origin_id}/visit"
-    client.post(url, json={"from_node_id": origin_id}, headers=V1)  # self: no from
-    again = client.post(url, json={}, headers=V1)  # same node again: no step
-    assert again.json()["recorded"] is False
-    # A chat right after opening does not add a second step either.
-    _chat_api(client, origin_id, "hello")
-    assert _trail(client, subj["id"]) == [(origin_id, None)]
-    assert client.get(f"/api/subjects/{subj['id']}/graph", headers=V1).json()["edges"] == []
-
-
-def test_visit_checks_scope_and_subject(env):
-    client, *_ = env
-    subj, origin_id = _new_subject(client)
-    _other_subj, other_origin = _new_subject(client)
-    assert client.post(f"/api/nodes/{origin_id}/visit", headers=V2).status_code == 404
-    res = client.post(
-        f"/api/nodes/{origin_id}/visit", json={"from_node_id": other_origin}, headers=V1
-    )
-    assert res.status_code == 422
-    res = client.post(f"/api/nodes/{origin_id}/visit", json={"from_node_id": 0}, headers=V1)
-    assert res.status_code == 422
-    assert _trail(client, subj["id"]) == []
-
-
-def test_nodes_are_flat_and_list_their_edges(env):
-    client, _, store = env
-    subj, origin_id = _new_subject(client)
-    child = store.insert_node(subj["id"], "Dativ", "")
-    grandchild = store.insert_node(subj["id"], "Dativ endings", "")
-    store.insert_edge(subj["id"], child.id, origin_id, "part_of", "")
-    store.insert_edge(subj["id"], grandchild.id, child.id, "part_of", "")
-    detail = client.get(f"/api/nodes/{grandchild.id}", headers=V1).json()
-    assert detail["node"]["id"] == grandchild.id
+def test_concept_detail_graph_and_visit(canvas):
+    client, _, store = canvas
+    s, _root = api_subject(client)
+    a = store.insert_node(s["id"], "Dativ", "")
+    b = store.insert_node(s["id"], "Dativ endings", "")
+    store.insert_edge(s["id"], b.id, a.id, "part_of", "")
+    detail = client.get(f"/api/nodes/{b.id}", headers=V1).json()
     assert [(e["source"], e["target"], e["kind"]) for e in detail["edges"]] == [
-        (grandchild.id, child.id, "part_of")
+        (b.id, a.id, "part_of")
     ]
-    dist = distances_from(origin_id, store.list_edges(subj["id"]))
-    assert dist[grandchild.id] == 2
+    assert distances_from(a.id, store.list_edges(s["id"]))[b.id] == 1
+    res = client.post(f"/api/nodes/{a.id}/visit", headers=V1)
+    assert res.json()["recorded"] is True
+    res = client.post(f"/api/nodes/{b.id}/visit", json={"from_node_id": a.id}, headers=V1)
+    assert res.json()["trail"][-1] == {
+        "node_id": b.id,
+        "from_node_id": a.id,
+        "at": res.json()["trail"][-1]["at"],
+    }
+    again = client.post(f"/api/nodes/{b.id}/visit", json={}, headers=V1)
+    assert again.json()["recorded"] is False
+    graph = client.get(f"/api/subjects/{s['id']}/graph", headers=V1).json()
+    assert [n["name"] for n in graph["nodes"]] == ["Dativ", "Dativ endings"]
+    assert len(graph["trail"]) == 2
+    assert client.post(f"/api/nodes/{a.id}/visit", headers=V2).status_code == 404
+    assert client.get(f"/api/subjects/{s['id']}/graph", headers=V2).status_code == 404
 
 
-def test_graph_status_and_extract_are_visitor_scoped(env):
-    client, *_ = env
-    subj, origin_id = _new_subject(client)
-    _chat_api(client, origin_id, "hello")
-    assert client.get(f"/api/subjects/{subj['id']}/graph/status", headers=V2).status_code == 404
-    assert client.get(f"/api/subjects/{subj['id']}/graph", headers=V2).status_code == 404
-    assert client.get(f"/api/nodes/{origin_id}", headers=V2).status_code == 404
-    assert client.post(f"/api/nodes/{origin_id}/extract", headers=V2).status_code == 404
-    res = client.post(f"/api/nodes/{origin_id}/chat", json={"message": "x"}, headers=V2)
-    assert res.status_code == 404
+def test_old_chat_routes_are_gone(canvas):
+    client, _, store = canvas
+    s, _root = api_subject(client)
+    a = store.insert_node(s["id"], "Dativ", "")
+    for path in ("chat", "extract", "update-graph", "dismiss"):
+        res = client.post(f"/api/nodes/{a.id}/{path}", json={"message": "x"}, headers=V1)
+        assert res.status_code in (404, 405), path

@@ -15,7 +15,7 @@ def g():
     s = Store(":memory:")
     subj = s.create_subject("v1", "German")
     sid = subj["id"]
-    n = {"German": s.node_by_id(subj["origin_node_id"])}
+    n = {"German": s.insert_node(sid, "German", "")}
     for name in ("Cases", "Dativ", "Dativ endings", "Wechselpräpositionen", "Contractions", "Lone"):
         n[name] = s.insert_node(sid, name, "")
     edges = [

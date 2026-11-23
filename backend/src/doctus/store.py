@@ -1,5 +1,12 @@
-"""SQLite storage for subjects, concept nodes, edges, evidence, the
-learner's trail, graph-change proposals and chat messages.
+"""SQLite storage for subjects, the branch canvas, concepts, edges, evidence,
+the learner's trail, graph-change proposals and chat messages.
+
+Two kinds of "node" live here:
+  * canvas nodes (`canvas_nodes`): the branching tree the learner grows,
+    `chat` nodes holding a conversation and `note` nodes holding text;
+  * concepts (the `nodes` table, kept under its old name): evidence-backed
+    ideas the cartographer found taught, each homed in the canvas node where
+    it was first taught.
 
 Every subject belongs to one anonymous visitor token, and every read
 or write goes through a subject the visitor owns.
@@ -108,6 +115,90 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 """
 
+# Schema version 1: the branch canvas (M3). Applied to new and existing
+# databases alike; existing subjects get one root chat node holding all of
+# their messages (M1/M2 per-concept chats are merged into it, in id order).
+MIGRATION_1 = """
+CREATE TABLE canvas_nodes (
+    id          INTEGER PRIMARY KEY,
+    subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    parent_id   INTEGER REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('chat', 'note')),
+    sort_index  INTEGER NOT NULL DEFAULT 0,
+    title       TEXT NOT NULL DEFAULT '',
+    keyword     TEXT NOT NULL DEFAULT '',
+    note_body   TEXT NOT NULL DEFAULT '',
+    created_at  REAL NOT NULL,
+    last_extracted_message_id INTEGER
+);
+CREATE UNIQUE INDEX canvas_one_root ON canvas_nodes (subject_id) WHERE parent_id IS NULL;
+CREATE INDEX canvas_parent ON canvas_nodes (parent_id);
+
+-- Follow-up questions the cartographer offered under a chat node.
+CREATE TABLE suggestions (
+    id             INTEGER PRIMARY KEY,
+    subject_id     INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    canvas_node_id INTEGER NOT NULL REFERENCES canvas_nodes(id) ON DELETE CASCADE,
+    text           TEXT NOT NULL,
+    created_at     REAL NOT NULL
+);
+
+ALTER TABLE messages ADD COLUMN canvas_node_id INTEGER
+    REFERENCES canvas_nodes(id) ON DELETE CASCADE;
+ALTER TABLE messages ADD COLUMN stopped INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX messages_canvas ON messages (canvas_node_id);
+ALTER TABLE nodes ADD COLUMN home_canvas_node_id INTEGER
+    REFERENCES canvas_nodes(id) ON DELETE SET NULL;
+ALTER TABLE subjects ADD COLUMN root_canvas_node_id INTEGER;
+
+-- Cartographer runs are now per canvas node, and node_id (a concept) is legacy.
+ALTER TABLE extractions RENAME TO extractions_m1;
+CREATE TABLE extractions (
+    id                INTEGER PRIMARY KEY,
+    subject_id        INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    node_id           INTEGER REFERENCES nodes(id) ON DELETE CASCADE,
+    canvas_node_id    INTEGER REFERENCES canvas_nodes(id) ON DELETE SET NULL,
+    at                REAL NOT NULL,
+    evidence_verified INTEGER NOT NULL,
+    evidence_dropped  INTEGER NOT NULL,
+    summary           TEXT NOT NULL
+);
+INSERT INTO extractions (id, subject_id, node_id, at, evidence_verified,
+                         evidence_dropped, summary)
+    SELECT id, subject_id, node_id, at, evidence_verified, evidence_dropped, summary
+    FROM extractions_m1;
+DROP TABLE extractions_m1;
+"""
+
+CANVAS_KINDS = ("chat", "note")
+TITLE_MAX = 60
+KEYWORD_MAX = 24
+
+
+def note_title(body: str) -> str:
+    """A note's title: its first non-empty line without Markdown heading marks."""
+    for line in body.splitlines():
+        line = line.strip().lstrip("#").strip()
+        if line:
+            return clean_title(line)
+    return ""
+
+
+def clean_title(text: str) -> str:
+    text = " ".join(text.split())
+    if len(text) > TITLE_MAX:
+        text = text[: TITLE_MAX - 1].rstrip() + "…"
+    return text
+
+
+def clean_keyword(text: str) -> str:
+    """One word: the first token, without surrounding punctuation."""
+    for token in text.split():
+        token = token.strip(".,;:!?\"'()[]{}*_`")
+        if token:
+            return token[:KEYWORD_MAX]
+    return ""
+
 
 class NotFound(Exception):
     pass
@@ -132,6 +223,28 @@ class Node:
     last_visited_at: float | None
     mastery: dict[str, Any] = field(default_factory=dict)
     last_extracted_message_id: int | None = None
+    home_canvas_node_id: int | None = None
+
+
+@dataclass
+class CanvasNode:
+    id: int
+    subject_id: int
+    parent_id: int | None
+    kind: str
+    sort_index: int
+    title: str
+    keyword: str
+    note_body: str
+    created_at: float
+    last_extracted_message_id: int | None = None
+
+
+@dataclass
+class Suggestion:
+    id: int
+    canvas_node_id: int
+    text: str
 
 
 @dataclass
@@ -176,6 +289,20 @@ class Message:
     role: str
     content: str
     created_at: float
+    canvas_node_id: int | None = None
+    stopped: bool = False  # a reply the learner stopped (kept as written)
+
+
+def _message(row) -> Message:
+    return Message(
+        row["id"],
+        row["node_id"],
+        row["role"],
+        row["content"],
+        row["created_at"],
+        row["canvas_node_id"],
+        bool(row["stopped"]),
+    )
 
 
 EDGE_KINDS = ("prerequisite", "part_of", "related")
@@ -193,10 +320,51 @@ class Store:
         self._lock = threading.RLock()
         self._depth = 0
         self._clock = clock
+        self._migrate(path)
         self.reset_running_cartographers()
 
     def close(self):
         self._db.close()
+
+    def _migrate(self, path: str):
+        version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        if version >= 1:
+            return
+        has_data = self._db.execute("SELECT COUNT(*) FROM subjects").fetchone()[0] > 0
+        if has_data and path != ":memory:":
+            # Keep a copy of the pre-canvas database (dev data, but cheap insurance).
+            backup = sqlite3.connect(path + ".pre-m3")
+            with backup:
+                self._db.backup(backup)
+            backup.close()
+        # One transaction: a failure part-way leaves the database at version 0.
+        # (executescript would commit each step, so statements run one by one.)
+        with self._db:
+            for statement in MIGRATION_1.split(";"):
+                if statement.strip():
+                    self._db.execute(statement)
+            for s in self._db.execute("SELECT id FROM subjects").fetchall():
+                sid = s["id"]
+                last = self._db.execute(
+                    "SELECT MAX(id) FROM messages WHERE subject_id = ?", (sid,)
+                ).fetchone()[0]
+                cur = self._db.execute(
+                    """INSERT INTO canvas_nodes (subject_id, parent_id, kind, sort_index,
+                                                 created_at, last_extracted_message_id)
+                       VALUES (?, NULL, 'chat', 0, ?, ?)""",
+                    (sid, self._clock(), last),
+                )
+                root = cur.lastrowid
+                self._db.execute(
+                    "UPDATE subjects SET root_canvas_node_id = ? WHERE id = ?", (root, sid)
+                )
+                self._db.execute(
+                    "UPDATE messages SET canvas_node_id = ? WHERE subject_id = ?", (root, sid)
+                )
+                self._db.execute(
+                    "UPDATE nodes SET home_canvas_node_id = ? WHERE subject_id = ?", (root, sid)
+                )
+            self._db.execute("PRAGMA user_version = 1")
 
     @property
     def now(self) -> float:
@@ -243,6 +411,22 @@ class Store:
             last_visited_at=row["last_visited_at"],
             mastery=json.loads(row["mastery"]),
             last_extracted_message_id=row["last_extracted_message_id"],
+            home_canvas_node_id=row["home_canvas_node_id"],
+        )
+
+    @staticmethod
+    def _canvas(row) -> CanvasNode:
+        return CanvasNode(
+            id=row["id"],
+            subject_id=row["subject_id"],
+            parent_id=row["parent_id"],
+            kind=row["kind"],
+            sort_index=row["sort_index"],
+            title=row["title"],
+            keyword=row["keyword"],
+            note_body=row["note_body"],
+            created_at=row["created_at"],
+            last_extracted_message_id=row["last_extracted_message_id"],
         )
 
     @staticmethod
@@ -251,8 +435,11 @@ class Store:
 
     # ---------- subjects ----------
 
-    def create_subject(self, visitor: str, title: str, goal: str = "") -> dict:
-        """Create a subject and its origin node (named after the title)."""
+    def create_subject(
+        self, visitor: str, title: str, goal: str = "", first_question: str = ""
+    ) -> dict:
+        """Create a subject and its root chat node. With `first_question`, the
+        root starts with that question, waiting for the tutor's answer."""
         title = title.strip()
         if not title:
             raise ValueError("Subject title cannot be empty.")
@@ -261,11 +448,24 @@ class Store:
                 "INSERT INTO subjects (visitor, title, goal, created_at) VALUES (?, ?, ?, ?)",
                 (visitor, title, goal.strip(), self._clock()),
             )
-            origin = self.insert_node(cur.lastrowid, title, goal.strip())
+            sid = cur.lastrowid
+            root = self._insert_canvas(sid, None, "chat", 0, "")
             self._db.execute(
-                "UPDATE subjects SET origin_node_id = ? WHERE id = ?", (origin.id, cur.lastrowid)
+                "UPDATE subjects SET root_canvas_node_id = ? WHERE id = ?", (root, sid)
             )
-        return self.get_subject(visitor, cur.lastrowid)
+            if first_question.strip():
+                self.add_canvas_message(root, "user", first_question.strip())
+        return self.get_subject(visitor, sid)
+
+    def rename_subject(self, visitor: str, subject_id: int, title: str) -> dict:
+        title = title.strip()
+        if not title:
+            raise ValueError("Subject title cannot be empty.")
+        self.get_subject(visitor, subject_id)
+        with self.atomic():
+            self._db.execute("UPDATE subjects SET title = ? WHERE id = ?", (title, subject_id))
+            self.bump_graph_version(subject_id)
+        return self.get_subject(visitor, subject_id)
 
     def list_subjects(self, visitor: str) -> list[dict]:
         rows = self._all(
@@ -353,7 +553,9 @@ class Store:
             raise NotFound(f"Node {node_id} not found.")
         return self._node(row)
 
-    def insert_node(self, subject_id: int, name: str, summary: str) -> Node:
+    def insert_node(
+        self, subject_id: int, name: str, summary: str, home_canvas_node_id: int | None = None
+    ) -> Node:
         name = name.strip()
         if not name:
             raise ValueError("Node name cannot be empty.")
@@ -361,9 +563,17 @@ class Store:
             if self.find_node_by_name(subject_id, name):
                 raise Conflict(f"A node named '{name}' already exists.")
             cur = self._db.execute(
-                """INSERT INTO nodes (subject_id, name, name_key, summary, created_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (subject_id, name, name_key(name), summary.strip(), self._clock()),
+                """INSERT INTO nodes (subject_id, name, name_key, summary, created_at,
+                                      home_canvas_node_id)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    subject_id,
+                    name,
+                    name_key(name),
+                    summary.strip(),
+                    self._clock(),
+                    home_canvas_node_id,
+                ),
             )
         return self.node_by_id(cur.lastrowid)
 
@@ -598,14 +808,19 @@ class Store:
         return [TrailStep(r["id"], r["node_id"], r["from_node_id"], r["at"]) for r in rows]
 
     def log_extraction(
-        self, subject_id: int, node_id: int, verified: int, dropped: int, summary: dict
+        self,
+        subject_id: int,
+        canvas_node_id: int | None,
+        verified: int,
+        dropped: int,
+        summary: dict,
     ):
         with self.atomic():
             self._db.execute(
-                """INSERT INTO extractions (subject_id, node_id, at, evidence_verified,
+                """INSERT INTO extractions (subject_id, canvas_node_id, at, evidence_verified,
                                             evidence_dropped, summary)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (subject_id, node_id, self._clock(), verified, dropped, json.dumps(summary)),
+                (subject_id, canvas_node_id, self._clock(), verified, dropped, json.dumps(summary)),
             )
 
     def extraction_stats(self, subject_id: int) -> dict[str, int]:
@@ -727,14 +942,20 @@ class Store:
     # ---------- messages ----------
 
     def add_message(self, subject_id: int, node_id: int | None, role: str, content: str) -> Message:
+        """M1/M2 concept-keyed chat message (kept for the old trail/graph tests)."""
         with self.atomic():
             cur = self._db.execute(
                 """INSERT INTO messages (subject_id, node_id, role, content, created_at)
                    VALUES (?, ?, ?, ?, ?)""",
                 (subject_id, node_id, role, content, self._clock()),
             )
-        row = self._one("SELECT * FROM messages WHERE id = ?", (cur.lastrowid,))
-        return Message(row["id"], row["node_id"], row["role"], row["content"], row["created_at"])
+        return self.message_by_id(cur.lastrowid)
+
+    def message_by_id(self, message_id: int) -> Message:
+        row = self._one("SELECT * FROM messages WHERE id = ?", (message_id,))
+        if row is None:
+            raise NotFound(f"Message {message_id} not found.")
+        return _message(row)
 
     def recent_messages(self, subject_id: int, node_id: int | None, limit: int) -> list[Message]:
         """Most recent messages for a topic chat (node_id) or the subject chat (None)."""
@@ -749,10 +970,7 @@ class Store:
                 "SELECT * FROM messages WHERE node_id = ? ORDER BY id DESC LIMIT ?",
                 (node_id, limit),
             )
-        return [
-            Message(r["id"], r["node_id"], r["role"], r["content"], r["created_at"])
-            for r in reversed(rows)
-        ]
+        return [_message(r) for r in reversed(rows)]
 
     def node_messages(
         self,
@@ -761,9 +979,22 @@ class Store:
         before_id: int | None = None,
         limit: int | None = None,
     ) -> list[Message]:
-        """Messages of one topic chat in id order, optionally after/before an id.
+        """Messages of one M1/M2 topic chat in id order."""
+        return self._messages_where("node_id", node_id, after_id, before_id, limit)
+
+    def canvas_messages(
+        self,
+        canvas_node_id: int,
+        after_id: int | None = None,
+        before_id: int | None = None,
+        limit: int | None = None,
+    ) -> list[Message]:
+        """Messages of one chat node in id order, optionally after/before an id.
         With `limit`, keeps the last `limit` of the matching messages."""
-        sql, args = "SELECT * FROM messages WHERE node_id = ?", [node_id]
+        return self._messages_where("canvas_node_id", canvas_node_id, after_id, before_id, limit)
+
+    def _messages_where(self, column, value, after_id, before_id, limit) -> list[Message]:
+        sql, args = f"SELECT * FROM messages WHERE {column} = ?", [value]  # noqa: S608
         if after_id is not None:
             sql += " AND id > ?"
             args.append(after_id)
@@ -774,8 +1005,462 @@ class Store:
         if limit is not None:
             sql += " LIMIT ?"
             args.append(limit)
-        rows = self._all(sql, args)
-        return [
-            Message(r["id"], r["node_id"], r["role"], r["content"], r["created_at"])
-            for r in reversed(rows)
-        ]
+        return [_message(r) for r in reversed(self._all(sql, args))]
+
+    def add_canvas_message(
+        self, canvas_node_id: int, role: str, content: str, stopped: bool = False
+    ) -> Message:
+        node = self.canvas_node_by_id(canvas_node_id)
+        with self.atomic():
+            cur = self._db.execute(
+                """INSERT INTO messages (subject_id, canvas_node_id, role, content,
+                                         created_at, stopped)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (node.subject_id, node.id, role, content, self._clock(), int(stopped)),
+            )
+            self.bump_graph_version(node.subject_id)
+        return self.message_by_id(cur.lastrowid)
+
+    def subject_canvas_messages(self, subject_id: int) -> dict[int, list[Message]]:
+        """Every canvas message of the subject, grouped by chat node, in order."""
+        rows = self._all(
+            """SELECT * FROM messages WHERE subject_id = ? AND canvas_node_id IS NOT NULL
+               ORDER BY id""",
+            (subject_id,),
+        )
+        out: dict[int, list[Message]] = {}
+        for r in rows:
+            out.setdefault(r["canvas_node_id"], []).append(_message(r))
+        return out
+
+    def unextracted_chat_nodes(self, subject_id: int) -> list[int]:
+        """Chat nodes with a tutor reply the cartographer has not processed yet."""
+        rows = self._all(
+            """SELECT c.id FROM canvas_nodes c
+               WHERE c.subject_id = ? AND c.kind = 'chat' AND EXISTS (
+                   SELECT 1 FROM messages m
+                   WHERE m.canvas_node_id = c.id AND m.role = 'assistant'
+                     AND m.id > COALESCE(c.last_extracted_message_id, 0))
+               ORDER BY c.id""",
+            (subject_id,),
+        )
+        return [r["id"] for r in rows]
+
+    def has_answer(self, canvas_node_id: int) -> bool:
+        row = self._one(
+            "SELECT 1 FROM messages WHERE canvas_node_id = ? AND role = 'assistant' LIMIT 1",
+            (canvas_node_id,),
+        )
+        return row is not None
+
+    # ---------- canvas ----------
+    # A tree per subject: every node has one parent (the root has none), and
+    # nodes are never moved, so no operation here can form a cycle.
+
+    def _insert_canvas(
+        self, subject_id: int, parent_id: int | None, kind: str, sort_index: int, body: str
+    ) -> int:
+        cur = self._db.execute(
+            """INSERT INTO canvas_nodes (subject_id, parent_id, kind, sort_index, title,
+                                         keyword, note_body, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                subject_id,
+                parent_id,
+                kind,
+                sort_index,
+                note_title(body) if kind == "note" else "",
+                clean_keyword(note_title(body)) if kind == "note" else "",
+                body if kind == "note" else "",
+                self._clock(),
+            ),
+        )
+        return cur.lastrowid
+
+    def get_canvas_node(self, visitor: str, canvas_node_id: int) -> CanvasNode:
+        row = self._one(
+            """SELECT c.* FROM canvas_nodes c JOIN subjects s ON s.id = c.subject_id
+               WHERE c.id = ? AND s.visitor = ?""",
+            (canvas_node_id, visitor),
+        )
+        if row is None:
+            raise NotFound(f"Canvas node {canvas_node_id} not found.")
+        return self._canvas(row)
+
+    def canvas_node_by_id(self, canvas_node_id: int) -> CanvasNode:
+        row = self._one("SELECT * FROM canvas_nodes WHERE id = ?", (canvas_node_id,))
+        if row is None:
+            raise NotFound(f"Canvas node {canvas_node_id} not found.")
+        return self._canvas(row)
+
+    def list_canvas_nodes(self, subject_id: int) -> list[CanvasNode]:
+        """Every node of the subject, parents before children, siblings in order."""
+        rows = self._all(
+            "SELECT * FROM canvas_nodes WHERE subject_id = ? ORDER BY sort_index, id",
+            (subject_id,),
+        )
+        nodes = [self._canvas(r) for r in rows]
+        children: dict[int | None, list[CanvasNode]] = {}
+        for n in nodes:
+            children.setdefault(n.parent_id, []).append(n)
+        out: list[CanvasNode] = []
+        stack = list(reversed(children.get(None, [])))
+        while stack:
+            n = stack.pop()
+            out.append(n)
+            stack.extend(reversed(children.get(n.id, [])))
+        return out
+
+    def canvas_children(self, canvas_node_id: int) -> list[CanvasNode]:
+        rows = self._all(
+            "SELECT * FROM canvas_nodes WHERE parent_id = ? ORDER BY sort_index, id",
+            (canvas_node_id,),
+        )
+        return [self._canvas(r) for r in rows]
+
+    def subtree_ids(self, canvas_node_id: int) -> list[int]:
+        """This node and everything below it."""
+        rows = self._all(
+            """WITH RECURSIVE below(id) AS (
+                   SELECT ?
+                   UNION
+                   SELECT c.id FROM canvas_nodes c JOIN below b ON c.parent_id = b.id
+               ) SELECT id FROM below""",
+            (canvas_node_id,),
+        )
+        return [r["id"] for r in rows]
+
+    def branch(self, canvas_node_id: int) -> list[CanvasNode]:
+        """The path from the root down to this node (inclusive)."""
+        path: list[CanvasNode] = []
+        current: CanvasNode | None = self.canvas_node_by_id(canvas_node_id)
+        seen: set[int] = set()
+        while current is not None and current.id not in seen:
+            seen.add(current.id)
+            path.append(current)
+            current = (
+                self.canvas_node_by_id(current.parent_id) if current.parent_id is not None else None
+            )
+        return path[::-1]
+
+    def add_canvas_node(
+        self, visitor: str, anchor_id: int, where: str, kind: str, text: str
+    ) -> CanvasNode:
+        """Add a chat node (with `text` as its first question) or a note (with
+        `text` as its body), as the last child of the anchor (`where="child"`)
+        or right after it among its siblings (`where="sibling"`)."""
+        if kind not in CANVAS_KINDS:
+            raise ValueError(f"Unknown canvas node kind: {kind}")
+        anchor = self.get_canvas_node(visitor, anchor_id)
+        text = text.strip()
+        if kind == "chat" and not text:
+            raise ValueError("A chat node needs its first question.")
+        with self.atomic():
+            if where == "child":
+                parent_id = anchor.id
+                row = self._one(
+                    """SELECT COALESCE(MAX(sort_index), -1) AS m FROM canvas_nodes
+                       WHERE parent_id = ?""",
+                    (parent_id,),
+                )
+                index = row["m"] + 1
+            elif where == "sibling":
+                if anchor.parent_id is None:
+                    raise Conflict("The root has no siblings; add a child instead.")
+                parent_id = anchor.parent_id
+                index = anchor.sort_index + 1
+                self._db.execute(
+                    """UPDATE canvas_nodes SET sort_index = sort_index + 1
+                       WHERE parent_id = ? AND sort_index >= ?""",
+                    (parent_id, index),
+                )
+            else:
+                raise ValueError(f"Unknown position: {where}")
+            new_id = self._insert_canvas(anchor.subject_id, parent_id, kind, index, text)
+            if kind == "chat":
+                self.add_canvas_message(new_id, "user", text)
+            self.bump_graph_version(anchor.subject_id)
+        return self.canvas_node_by_id(new_id)
+
+    def update_canvas_node(
+        self,
+        visitor: str,
+        canvas_node_id: int,
+        kind: str | None = None,
+        prompt: str | None = None,
+        note_body: str | None = None,
+    ) -> CanvasNode:
+        """Switch kind, edit a chat's first question, or edit a note's body.
+        Switching kind and editing the question only work before an answer."""
+        node = self.get_canvas_node(visitor, canvas_node_id)
+        with self.atomic():
+            if kind is not None and kind != node.kind:
+                if kind not in CANVAS_KINDS:
+                    raise ValueError(f"Unknown canvas node kind: {kind}")
+                if self.has_answer(node.id):
+                    raise Conflict("This node already has an answer; its kind cannot change.")
+                if kind == "note":
+                    messages = self.canvas_messages(node.id)
+                    body = messages[0].content if messages else ""
+                    self._db.execute("DELETE FROM messages WHERE canvas_node_id = ?", (node.id,))
+                    self._db.execute("DELETE FROM suggestions WHERE canvas_node_id = ?", (node.id,))
+                    self._set_note(node.id, body)
+                else:
+                    body = node.note_body.strip()
+                    self._db.execute(
+                        """UPDATE canvas_nodes SET kind = 'chat', note_body = '', title = '',
+                                                   keyword = '' WHERE id = ?""",
+                        (node.id,),
+                    )
+                    if body:
+                        self.add_canvas_message(node.id, "user", body)
+                self._db.execute("UPDATE canvas_nodes SET kind = ? WHERE id = ?", (kind, node.id))
+                node = self.canvas_node_by_id(node.id)
+            if prompt is not None:
+                if node.kind != "chat":
+                    raise Conflict("Only a chat node has a question to edit.")
+                if self.has_answer(node.id):
+                    raise Conflict("This question already has an answer; ask a follow-up instead.")
+                prompt = prompt.strip()
+                if not prompt:
+                    raise ValueError("The question cannot be empty.")
+                first = self.canvas_messages(node.id)
+                if first:
+                    self._db.execute(
+                        "UPDATE messages SET content = ? WHERE id = ?", (prompt, first[0].id)
+                    )
+                else:
+                    self.add_canvas_message(node.id, "user", prompt)
+            if note_body is not None:
+                if node.kind != "note":
+                    raise Conflict("Only a note has a body to edit.")
+                self._set_note(node.id, note_body)
+            self.bump_graph_version(node.subject_id)
+        return self.canvas_node_by_id(node.id)
+
+    def _set_note(self, canvas_node_id: int, body: str):
+        title = note_title(body)
+        self._db.execute(
+            "UPDATE canvas_nodes SET note_body = ?, title = ?, keyword = ? WHERE id = ?",
+            (body, title, clean_keyword(title), canvas_node_id),
+        )
+
+    def delete_canvas_node(self, visitor: str, canvas_node_id: int, branch: bool = False) -> dict:
+        """Delete a node; one with children needs `branch=True` (the whole
+        branch goes). Concepts left with no evidence are deleted; a concept
+        whose home went but that has evidence elsewhere moves to the node of
+        its earliest remaining evidence."""
+        node = self.get_canvas_node(visitor, canvas_node_id)
+        if node.parent_id is None:
+            raise Conflict("The root cannot be deleted.")
+        ids = self.subtree_ids(node.id)
+        if len(ids) > 1 and not branch:
+            raise Conflict(
+                f"This node has {len(ids) - 1} node(s) below it; "
+                "pass confirm=branch to delete the whole branch."
+            )
+        marks = ",".join("?" * len(ids))
+        with self.atomic():
+            affected = {
+                r["id"]
+                for r in self._all(
+                    f"""SELECT id FROM nodes WHERE home_canvas_node_id IN ({marks})
+                        UNION
+                        SELECT e.node_id FROM node_evidence e JOIN messages m
+                          ON m.id = e.message_id WHERE m.canvas_node_id IN ({marks})""",  # noqa: S608
+                    (*ids, *ids),
+                )
+            }
+            self._db.execute(f"DELETE FROM canvas_nodes WHERE id IN ({marks})", ids)  # noqa: S608
+            removed, moved = [], []
+            for concept_id in sorted(affected):
+                concept = self.node_by_id(concept_id)
+                first = self._one(
+                    """SELECT m.canvas_node_id FROM node_evidence e
+                       JOIN messages m ON m.id = e.message_id
+                       WHERE e.node_id = ? AND m.canvas_node_id IS NOT NULL
+                       ORDER BY m.id LIMIT 1""",
+                    (concept_id,),
+                )
+                if first is None:
+                    self._db.execute("DELETE FROM nodes WHERE id = ?", (concept_id,))
+                    removed.append(concept.name)
+                elif concept.home_canvas_node_id is None:
+                    self._db.execute(
+                        "UPDATE nodes SET home_canvas_node_id = ? WHERE id = ?",
+                        (first["canvas_node_id"], concept_id),
+                    )
+                    moved.append(concept.name)
+            self.bump_graph_version(node.subject_id)
+        return {"deleted": ids, "concepts_removed": removed, "concepts_moved": moved}
+
+    def set_title_keyword(self, canvas_node_id: int, title: str, keyword: str):
+        with self.atomic():
+            self._db.execute(
+                "UPDATE canvas_nodes SET title = ?, keyword = ? WHERE id = ?",
+                (title, keyword, canvas_node_id),
+            )
+
+    def set_canvas_last_extracted(self, canvas_node_id: int, message_id: int):
+        with self.atomic():
+            self._db.execute(
+                "UPDATE canvas_nodes SET last_extracted_message_id = ? WHERE id = ?",
+                (message_id, canvas_node_id),
+            )
+
+    # ---------- concepts on the canvas ----------
+
+    def concepts_homed(self, canvas_node_ids: list[int]) -> list[Node]:
+        """Concepts first taught in these canvas nodes, newest first."""
+        if not canvas_node_ids:
+            return []
+        marks = ",".join("?" * len(canvas_node_ids))
+        rows = self._all(
+            f"SELECT * FROM nodes WHERE home_canvas_node_id IN ({marks}) ORDER BY id DESC",  # noqa: S608
+            canvas_node_ids,
+        )
+        return [self._node(r) for r in rows]
+
+    def concepts_evidenced_in(self, canvas_node_id: int) -> list[Node]:
+        """Concepts with at least one evidence quote from this node's messages."""
+        rows = self._all(
+            """SELECT DISTINCT n.* FROM nodes n JOIN node_evidence e ON e.node_id = n.id
+               JOIN messages m ON m.id = e.message_id
+               WHERE m.canvas_node_id = ? ORDER BY n.id""",
+            (canvas_node_id,),
+        )
+        return [self._node(r) for r in rows]
+
+    def evidence_with_nodes(self, concept_id: int) -> list[dict]:
+        rows = self._all(
+            """SELECT e.quote, e.message_id, m.canvas_node_id FROM node_evidence e
+               JOIN messages m ON m.id = e.message_id WHERE e.node_id = ? ORDER BY e.id""",
+            (concept_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def concept_names_recent(self, subject_id: int) -> list[Node]:
+        rows = self._all("SELECT * FROM nodes WHERE subject_id = ? ORDER BY id DESC", (subject_id,))
+        return [self._node(r) for r in rows]
+
+    # ---------- suggestions ----------
+
+    def replace_suggestions(self, canvas_node_id: int, texts: list[str]) -> bool:
+        """Swap the node's open suggestions for `texts`; True if they changed."""
+        node = self.canvas_node_by_id(canvas_node_id)
+        with self.atomic():
+            old = [s.text for s in self.node_suggestions(canvas_node_id)]
+            if old == texts:
+                return False
+            self._db.execute("DELETE FROM suggestions WHERE canvas_node_id = ?", (canvas_node_id,))
+            for text in texts:
+                self._db.execute(
+                    """INSERT INTO suggestions (subject_id, canvas_node_id, text, created_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (node.subject_id, canvas_node_id, text, self._clock()),
+                )
+        return True
+
+    def node_suggestions(self, canvas_node_id: int) -> list[Suggestion]:
+        rows = self._all(
+            "SELECT * FROM suggestions WHERE canvas_node_id = ? ORDER BY id", (canvas_node_id,)
+        )
+        return [Suggestion(r["id"], r["canvas_node_id"], r["text"]) for r in rows]
+
+    def list_suggestions(self, subject_id: int) -> list[Suggestion]:
+        rows = self._all(
+            "SELECT * FROM suggestions WHERE subject_id = ? ORDER BY id", (subject_id,)
+        )
+        return [Suggestion(r["id"], r["canvas_node_id"], r["text"]) for r in rows]
+
+    def accept_suggestion(self, visitor: str, suggestion_id: int) -> CanvasNode:
+        """A child chat node whose first question is the suggestion's text."""
+        row = self._one(
+            """SELECT g.* FROM suggestions g JOIN subjects s ON s.id = g.subject_id
+               WHERE g.id = ? AND s.visitor = ?""",
+            (suggestion_id, visitor),
+        )
+        if row is None:
+            raise NotFound(f"Suggestion {suggestion_id} not found.")
+        with self.atomic():
+            node = self.add_canvas_node(
+                visitor, row["canvas_node_id"], "child", "chat", row["text"]
+            )
+            self._db.execute("DELETE FROM suggestions WHERE id = ?", (suggestion_id,))
+        return node
+
+    # ---------- search ----------
+
+    def search(self, subject_id: int, query: str, limit: int = 50) -> list[dict]:
+        """Case-insensitive substring search over node titles, messages, notes
+        and concepts. Each hit names the canvas node to move to."""
+        q = query.strip()
+        if not q:
+            raise ValueError("Search needs some text.")
+        pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        like = "LIKE ? ESCAPE '\\'"
+        hits: list[dict] = []
+
+        def add(rows, field_name, text_key):
+            for r in rows:
+                hits.append(
+                    {
+                        "canvas_node_id": r["canvas_node_id"],
+                        "field": field_name,
+                        "snippet": snippet(r[text_key], q),
+                        **({"concept_id": r["concept_id"]} if field_name == "concept" else {}),
+                        **({"message_id": r["message_id"]} if field_name == "message" else {}),
+                    }
+                )
+
+        add(
+            self._all(
+                f"""SELECT id AS canvas_node_id, title FROM canvas_nodes
+                    WHERE subject_id = ? AND title {like} ORDER BY id""",  # noqa: S608
+                (subject_id, pattern),
+            ),
+            "title",
+            "title",
+        )
+        add(
+            self._all(
+                f"""SELECT id AS canvas_node_id, note_body FROM canvas_nodes
+                    WHERE subject_id = ? AND kind = 'note' AND note_body {like}
+                    ORDER BY id""",  # noqa: S608
+                (subject_id, pattern),
+            ),
+            "note",
+            "note_body",
+        )
+        add(
+            self._all(
+                f"""SELECT id AS concept_id, home_canvas_node_id AS canvas_node_id,
+                           name || ': ' || summary AS text FROM nodes
+                    WHERE subject_id = ? AND home_canvas_node_id IS NOT NULL
+                      AND (name {like} OR summary {like}) ORDER BY id""",  # noqa: S608
+                (subject_id, pattern, pattern),
+            ),
+            "concept",
+            "text",
+        )
+        add(
+            self._all(
+                f"""SELECT id AS message_id, canvas_node_id, content FROM messages
+                    WHERE subject_id = ? AND canvas_node_id IS NOT NULL AND content {like}
+                    ORDER BY id""",  # noqa: S608
+                (subject_id, pattern),
+            ),
+            "message",
+            "content",
+        )
+        return hits[:limit]
+
+
+def snippet(text: str, query: str, width: int = 60) -> str:
+    """About `width` characters of `text` on each side of the first match."""
+    flat = " ".join(text.split())
+    at = flat.lower().find(query.lower())
+    if at < 0:
+        return flat[: 2 * width]
+    start, end = max(0, at - width), min(len(flat), at + len(query) + width)
+    return ("…" if start else "") + flat[start:end] + ("…" if end < len(flat) else "")

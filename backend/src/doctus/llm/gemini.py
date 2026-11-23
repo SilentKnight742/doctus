@@ -1,6 +1,7 @@
 """Gemini provider, using the google-genai SDK."""
 
 import math
+from collections.abc import Iterator
 
 from google import genai
 from google.genai import errors, types
@@ -41,30 +42,40 @@ class GeminiLLM(LLM):
                 model=self._model, contents=contents, config=config
             )
         except errors.APIError as exc:
-            code = getattr(exc, "code", None)
-            if code == 429:
-                raise RateLimited(
-                    "Gemini rate limit reached; try again shortly.",
-                    retry_after=retry_after_seconds(exc),
-                ) from exc
-            raise LLMError(f"Gemini API error ({code or '?'}): {exc}") from exc
+            raise _mapped(exc) from exc
         text = response.text
         if not text:
             raise LLMError("Gemini returned an empty response (possibly blocked).")
         return text
 
     def chat(self, system: str, turns: list[Turn]) -> str:
-        contents = [
-            types.Content(
-                role="model" if t.role == "assistant" else "user",
-                parts=[types.Part(text=t.content)],
-            )
-            for t in turns
-        ]
         return self._call(
-            contents,
+            _contents(turns),
             types.GenerateContentConfig(system_instruction=system, temperature=0.7),
         )
+
+    def chat_stream(self, system: str, turns: list[Turn]) -> Iterator[str]:
+        wrote = False
+        try:
+            stream = self._client.models.generate_content_stream(
+                model=self._model,
+                contents=_contents(turns),
+                config=types.GenerateContentConfig(system_instruction=system, temperature=0.7),
+            )
+            try:
+                for chunk in stream:
+                    text = chunk.text
+                    if text:
+                        wrote = True
+                        yield text
+            finally:
+                close = getattr(stream, "close", None)
+                if close:
+                    close()
+        except errors.APIError as exc:
+            raise _mapped(exc) from exc
+        if not wrote:
+            raise LLMError("Gemini returned an empty response (possibly blocked).")
 
     def _raw_json(self, system: str, prompt: str, schema: type[BaseModel]) -> str:
         return self._call(
@@ -76,3 +87,23 @@ class GeminiLLM(LLM):
                 response_json_schema=schema.model_json_schema(),
             ),
         )
+
+
+def _contents(turns: list[Turn]):
+    return [
+        types.Content(
+            role="model" if t.role == "assistant" else "user",
+            parts=[types.Part(text=t.content)],
+        )
+        for t in turns
+    ]
+
+
+def _mapped(exc) -> LLMError:
+    code = getattr(exc, "code", None)
+    if code == 429:
+        return RateLimited(
+            "Gemini rate limit reached; try again shortly.",
+            retry_after=retry_after_seconds(exc),
+        )
+    return LLMError(f"Gemini API error ({code or '?'}): {exc}")

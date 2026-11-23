@@ -1,4 +1,4 @@
-"""Graph helpers, plus the older proposal flow (starter map / update-graph).
+"""Graph helpers, plus the older proposal flow (starter map).
 
 The proposal flow turns model output into graph-change proposals the
 learner reviews. It is outside the main exploration flow for now.
@@ -10,8 +10,8 @@ stored as pending proposals.
 
 from collections import deque
 
-from .llm import LLM, Turn
-from .prompts import SKELETON_SYSTEM, UPDATE_SYSTEM, GraphProposal
+from .llm import LLM
+from .prompts import SKELETON_SYSTEM, GraphProposal
 from .store import Edge, Proposal, Store, name_key
 
 
@@ -91,30 +91,3 @@ def propose_skeleton(store: Store, llm: LLM, subject: dict) -> list[Proposal]:
     result = llm.structured(SKELETON_SYSTEM, prompt, GraphProposal)
     items = _filter(store, subject["id"], result, max_items=None)
     return store.add_proposals(subject["id"], items, origin="skeleton")
-
-
-def propose_update(
-    store: Store, llm: LLM, subject: dict, node_id: int, turns: list[Turn], max_items: int
-) -> list[Proposal]:
-    nodes = store.list_nodes(subject["id"])
-    current_map = (
-        "\n".join(
-            f"- {n.name}"
-            + (
-                " (needs: " + ", ".join(p.name for p in store.prerequisites(n.id)) + ")"
-                if store.prerequisites(n.id)
-                else ""
-            )
-            for n in nodes
-        )
-        or "(empty)"
-    )
-    focus = next((n.name for n in nodes if n.id == node_id), "?")
-    conversation = "\n".join(f"{t.role}: {t.content}" for t in turns)
-    prompt = (
-        f"Subject: {subject['title']}\nCurrent map:\n{current_map}\n\n"
-        f"Conversation about '{focus}':\n{conversation}"
-    )
-    result = llm.structured(UPDATE_SYSTEM.format(max_items=max_items), prompt, GraphProposal)
-    items = _filter(store, subject["id"], result, max_items=max_items)
-    return store.add_proposals(subject["id"], items, origin=f"chat:node:{node_id}")

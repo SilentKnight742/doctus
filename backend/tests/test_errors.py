@@ -1,47 +1,74 @@
-"""Error handling: exact status codes, model failures, and a no-500 sweep."""
+"""Error handling: exact status codes, model failures, and a no-500 sweep
+over every route (other visitor -> 404, bad ids -> 422, never a 500)."""
 
 import itertools
 
 import pytest
-from fastapi.testclient import TestClient
 
-from doctus.api import create_app
-from doctus.config import Settings
-from doctus.llm import FakeLLM, LLMError, RateLimited
-from doctus.mastery import PlaceholderDecayModel
-from doctus.store import Store
+from conftest import V1, V2, chat, child, make_client, new_subject
+from doctus.llm import LLMError, RateLimited
 
-V1 = {"X-Doctus-Visitor": "visitor-one-0000000"}
-V2 = {"X-Doctus-Visitor": "visitor-two-0000000"}
 MISSING = 987654
 
 
 @pytest.fixture
 def env():
-    llm = FakeLLM()
-    store = Store(":memory:")
-    settings = Settings(
-        db_path=":memory:",
-        llm_provider="fake",
-        gemini_api_key=None,
-        gemini_model="x",
-        max_proposals_per_update=5,
-        recent_turns_in_context=8,
+    return make_client()
+
+
+def _setup(client):
+    """A subject with a root chat, a child chat, a note and a suggestion."""
+    s, root = new_subject(client)
+    client.app.state.cartographer.llm.queue_json(
+        {"title": "T", "keyword": "t", "suggestions": ["Next?"]}
     )
-    app = create_app(store=store, llm=llm, mastery=PlaceholderDecayModel(), settings=settings)
-    # 500s come back as responses, not raised exceptions, so the sweep can see them.
-    return TestClient(app, raise_server_exceptions=False), llm, store
+    chat(client, root, "hello")
+    a = child(client, root, "child?").json()["id"]
+    note = child(client, root, "note", kind="note").json()["id"]
+    suggestion = client.get(f"/api/subjects/{s['id']}/canvas", headers=V1).json()["suggestions"]
+    return {"subject": s["id"], "root": root, "child": a, "note": note, "sugg": suggestion[0]["id"]}
 
 
-def _subject(client, headers=V1, title="German"):
-    s = client.post("/api/subjects", json={"title": title}, headers=headers).json()
-    return s["id"], s["origin_node_id"]
+# Every route that takes an id: (method, path, json body for a valid call).
+ID_ROUTES = [
+    ("patch", "/api/subjects/{id}", {"title": "New"}),
+    ("get", "/api/subjects/{id}/canvas", None),
+    ("get", "/api/subjects/{id}/canvas/status", None),
+    ("get", "/api/subjects/{id}/search?q=hello", None),
+    ("get", "/api/subjects/{id}/graph", None),
+    ("get", "/api/subjects/{id}/graph/status", None),
+    ("get", "/api/subjects/{id}/proposals", None),
+    ("post", "/api/subjects/{id}/skeleton", None),
+    ("get", "/api/canvas-nodes/{id}", None),
+    ("get", "/api/canvas-nodes/{id}/path", None),
+    ("post", "/api/canvas-nodes/{id}/children", {"kind": "chat", "text": "q"}),
+    ("post", "/api/canvas-nodes/{id}/siblings", {"kind": "note", "text": "n"}),
+    ("patch", "/api/canvas-nodes/{id}", {"prompt": "edited"}),
+    ("delete", "/api/canvas-nodes/{id}", None),
+    ("post", "/api/canvas-nodes/{id}/chat", {"message": "hi"}),
+    ("post", "/api/canvas-nodes/{id}/stop", None),
+    ("post", "/api/canvas-nodes/{id}/extract", None),
+    ("post", "/api/suggestions/{id}/accept", None),
+    ("get", "/api/nodes/{id}", None),
+    ("post", "/api/nodes/{id}/visit", None),
+    ("post", "/api/proposals/{id}/accept", None),
+    ("post", "/api/proposals/{id}/reject", None),
+]
 
 
-def _chat(client, node_id, message="hello", headers=V1, **extra):
-    return client.post(
-        f"/api/nodes/{node_id}/chat", json={"message": message, **extra}, headers=headers
-    )
+def _owner_id(ids, path):
+    if path.startswith("/api/subjects"):
+        return ids["subject"]
+    if path.startswith("/api/suggestions"):
+        return ids["sugg"]
+    return ids["child"]
+
+
+def _call(client, method, path, body, headers):
+    kwargs = {"headers": headers}
+    if body is not None:
+        kwargs["json"] = body
+    return getattr(client, method)(path, **kwargs)
 
 
 # ---------- 422 ----------
@@ -59,10 +86,10 @@ def test_422_bad_visitor_header(env, headers):
 
 def test_422_message_empty_or_too_long(env):
     client, *_ = env
-    _, origin = _subject(client)
-    assert _chat(client, origin, "").status_code == 422
-    assert _chat(client, origin, "x" * 8001).status_code == 422
-    assert _chat(client, origin, "x" * 8000).status_code == 200
+    _, root = new_subject(client)
+    assert chat(client, root, "").status_code == 422
+    assert chat(client, root, "x" * 8001).status_code == 422
+    assert chat(client, root, "x" * 8000).status_code == 200
 
 
 @pytest.mark.parametrize("title", ["", "   ", "x" * 121])
@@ -71,31 +98,20 @@ def test_422_bad_subject_title(env, title):
     assert client.post("/api/subjects", json={"title": title}, headers=V1).status_code == 422
 
 
+def test_422_bad_first_question(env):
+    client, *_ = env
+    for bad in ({"title": "T", "first_question": "x" * 8001}, {"title": "T", "first_question": 5}):
+        assert client.post("/api/subjects", json=bad, headers=V1).status_code == 422
+
+
+@pytest.mark.parametrize(("method", "route", "body"), ID_ROUTES)
 @pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("get", "/api/subjects/abc/graph"),
-        ("get", "/api/subjects/1.5/graph/status"),
-        ("get", "/api/nodes/abc"),
-        ("post", "/api/nodes/abc/extract"),
-        ("post", "/api/proposals/abc/accept"),
-        # out of SQLite's integer range: used to overflow the driver (500)
-        ("get", "/api/subjects/99999999999999999999/graph"),
-        ("get", "/api/nodes/9223372036854775808"),
-        ("get", "/api/nodes/0"),
-        ("post", "/api/nodes/-1/extract"),
-    ],
+    "raw", ["abc", "1.5", "0", "-1", "99999999999999999999", "9223372036854775808"]
 )
-def test_422_non_integer_ids(env, method, path):
+def test_422_bad_ids_on_every_route(env, method, route, body, raw):
     client, *_ = env
-    assert getattr(client, method)(path, headers=V1).status_code == 422
-
-
-def test_422_bad_from_node_id(env):
-    client, *_ = env
-    _, origin = _subject(client)
-    for bad in ("abc", 0, -1, 99999999999999999999):
-        assert _chat(client, origin, from_node_id=bad).status_code == 422
+    res = _call(client, method, route.format(id=raw), body, V1)
+    assert res.status_code == 422, (method, route, raw, res.text[:200])
 
 
 @pytest.mark.parametrize(
@@ -103,79 +119,49 @@ def test_422_bad_from_node_id(env):
 )
 def test_422_malformed_json_body(env, body):
     client, *_ = env
-    _, origin = _subject(client)
+    _, root = new_subject(client)
     h = {**V1, "Content-Type": "application/json"}
     assert client.post("/api/subjects", content=body, headers=h).status_code == 422
-    assert client.post(f"/api/nodes/{origin}/chat", content=body, headers=h).status_code == 422
-
-
-def test_422_from_node_id_from_another_subject(env):
-    client, *_ = env
-    _, origin_a = _subject(client, title="A")
-    _, origin_b = _subject(client, title="B")
-    res = _chat(client, origin_a, from_node_id=origin_b)
+    res = client.post(f"/api/canvas-nodes/{root}/children", content=body, headers=h)
     assert res.status_code == 422
-    assert "another subject" in res.json()["detail"]
 
 
 # ---------- 404 ----------
 
 
-def test_404_other_visitors_subject_and_node(env):
+@pytest.mark.parametrize(("method", "route", "body"), ID_ROUTES)
+def test_404_other_visitor_on_every_route(env, method, route, body):
     client, *_ = env
-    sid, origin = _subject(client)
-    for res in (
-        client.get(f"/api/subjects/{sid}/graph", headers=V2),
-        client.get(f"/api/subjects/{sid}/graph/status", headers=V2),
-        client.get(f"/api/subjects/{sid}/proposals", headers=V2),
-        client.post(f"/api/subjects/{sid}/skeleton", headers=V2),
-        client.get(f"/api/nodes/{origin}", headers=V2),
-        _chat(client, origin, headers=V2),
-        client.post(f"/api/nodes/{origin}/extract", headers=V2),
-        client.post(f"/api/nodes/{origin}/update-graph", headers=V2),
-    ):
-        assert res.status_code == 404, res.request.url
-    # and the owner's own node cannot be reached via another visitor's from_node_id
-    _, other_origin = _subject(client, headers=V2, title="Theirs")
-    assert _chat(client, origin, from_node_id=other_origin).status_code == 404
+    ids = _setup(client)
+    if route.startswith(("/api/nodes", "/api/proposals")):
+        store = client.app.state.store
+        if route.startswith("/api/nodes"):
+            target = store.insert_node(ids["subject"], "Concept", "").id
+        else:
+            (p,) = store.add_proposals(ids["subject"], [("node", {"name": "P"})], "test")
+            target = p.id
+    else:
+        target = _owner_id(ids, route)
+    res = _call(client, method, route.format(id=target), body, V2)
+    assert res.status_code == 404, (method, route, res.text[:200])
 
 
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("get", f"/api/subjects/{MISSING}/graph"),
-        ("get", f"/api/subjects/{MISSING}/graph/status"),
-        ("get", f"/api/subjects/{MISSING}/proposals"),
-        ("post", f"/api/subjects/{MISSING}/skeleton"),
-        ("get", f"/api/nodes/{MISSING}"),
-        ("post", f"/api/nodes/{MISSING}/extract"),
-        ("post", f"/api/nodes/{MISSING}/update-graph"),
-        ("post", f"/api/proposals/{MISSING}/accept"),
-        ("post", f"/api/proposals/{MISSING}/reject"),
-    ],
-)
-def test_404_ids_that_do_not_exist(env, method, path):
+@pytest.mark.parametrize(("method", "route", "body"), ID_ROUTES)
+def test_404_ids_that_do_not_exist(env, method, route, body):
     client, *_ = env
-    assert getattr(client, method)(path, headers=V1).status_code == 404
-
-
-def test_404_missing_node_in_chat_and_from_node_id(env):
-    client, *_ = env
-    _, origin = _subject(client)
-    assert _chat(client, MISSING).status_code == 404
-    assert _chat(client, origin, from_node_id=MISSING).status_code == 404
+    res = _call(client, method, route.format(id=MISSING), body, V1)
+    assert res.status_code == 404, (method, route, res.text[:200])
 
 
 # ---------- 409 ----------
 
 
-def test_409_manual_extract_with_no_new_messages(env):
+def test_409_manual_extract_with_no_new_exchange(env):
     client, *_ = env
-    _, origin = _subject(client)
-    res = client.post(f"/api/nodes/{origin}/extract", headers=V1)
-    assert res.status_code == 409
-    _chat(client, origin)  # the background run consumes the new messages
-    assert client.post(f"/api/nodes/{origin}/extract", headers=V1).status_code == 409
+    _, root = new_subject(client)
+    assert client.post(f"/api/canvas-nodes/{root}/extract", headers=V1).status_code == 409
+    chat(client, root, "hi")  # the run after the reply consumes the exchange
+    assert client.post(f"/api/canvas-nodes/{root}/extract", headers=V1).status_code == 409
 
 
 # ---------- model failures ----------
@@ -183,61 +169,51 @@ def test_409_manual_extract_with_no_new_messages(env):
 
 def test_cartographer_invalid_json_twice_then_recovers(env):
     client, llm, store = env
-    sid, origin = _subject(client)
+    s, root = new_subject(client)
     llm.queue_json("not json")
     llm.queue_json("{still not json")
-    res = _chat(client, origin, "first")
-    assert res.status_code == 200
-    status = client.get(f"/api/subjects/{sid}/graph/status", headers=V1).json()
-    assert status["cartographer"] == "error"
-    assert "invalid Extraction" in status["error"]
-    llm.queue_json({"current_node_evidence": ["You said: second"]})
-    assert _chat(client, origin, "second").status_code == 200
-    status = client.get(f"/api/subjects/{sid}/graph/status", headers=V1).json()
-    assert status == {"graph_version": 1, "cartographer": "idle", "error": None}
-    assert store.node_by_id(origin).last_extracted_message_id == (
-        store.node_messages(origin)[-1].id
+    assert chat(client, root, "first").status_code == 200
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
+    assert status["cartographer"] == "error" and "invalid CanvasExtraction" in status["error"]
+    llm.queue_json({"title": "Second"})
+    assert chat(client, root, "second").status_code == 200
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
+    assert status["cartographer"] == "idle" and status["error"] is None
+    assert store.canvas_node_by_id(root).last_extracted_message_id == (
+        store.canvas_messages(root)[-1].id
     )
-
-
-def test_rate_limited_tutor_returns_429_with_retry_after(env):
-    client, llm, store = env
-    _, origin = _subject(client)
-    llm.queue_chat(RateLimited("Gemini rate limit reached; try again shortly.", retry_after=37))
-    res = _chat(client, origin)
-    assert res.status_code == 429
-    assert res.headers["retry-after"] == "37"
-    assert "rate limit" in res.json()["detail"]
-    assert store.node_messages(origin) == []  # nothing saved for a failed reply
-
-
-def test_other_tutor_failure_stays_502(env):
-    client, llm, _ = env
-    _, origin = _subject(client)
-    llm.queue_chat(LLMError("Gemini API error (500): boom"))
-    res = _chat(client, origin)
-    assert res.status_code == 502
-    assert "retry-after" not in res.headers
 
 
 def test_rate_limited_manual_extract_returns_429_and_cartographer_records_it(env):
     client, llm, store = env
-    sid, origin = _subject(client)
-    store.add_message(sid, origin, "user", "hello")
+    s, root = new_subject(client)
+    store.add_canvas_message(root, "user", "hello")
+    store.add_canvas_message(root, "assistant", "hi")
     llm.queue_json(RateLimited("Gemini rate limit reached; try again shortly.", retry_after=5))
-    res = client.post(f"/api/nodes/{origin}/extract", headers=V1)
+    res = client.post(f"/api/canvas-nodes/{root}/extract", headers=V1)
     assert res.status_code == 429 and res.headers["retry-after"] == "5"
-    status = client.get(f"/api/subjects/{sid}/graph/status", headers=V1).json()
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
     assert status["cartographer"] == "error" and "rate limit" in status["error"]
 
 
 def test_rate_limited_background_run_does_not_break_chat(env):
     client, llm, _ = env
-    sid, origin = _subject(client)
+    s, root = new_subject(client)
     llm.queue_json(RateLimited("Gemini rate limit reached; try again shortly."))
-    assert _chat(client, origin).status_code == 200
-    status = client.get(f"/api/subjects/{sid}/graph/status", headers=V1).json()
+    assert chat(client, root, "hi").status_code == 200
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
     assert status["cartographer"] == "error"
+
+
+def test_tutor_failures_map_to_429_and_502(env):
+    client, llm, _ = env
+    _, root = new_subject(client)
+    llm.queue_chat(RateLimited("Gemini rate limit reached; try again shortly.", retry_after=37))
+    res = chat(client, root, "x")
+    assert res.status_code == 429 and res.headers["retry-after"] == "37"
+    llm.queue_chat(LLMError("Gemini API error (500): boom"))
+    res = chat(client, root)
+    assert res.status_code == 502 and "retry-after" not in res.headers
 
 
 def test_gemini_429_maps_to_rate_limited_with_retry_delay():
@@ -283,6 +259,40 @@ def test_gemini_client_raises_rate_limited_on_429(monkeypatch):
     assert not isinstance(caught.value, RateLimited)
 
 
+def test_gemini_stream_raises_rate_limited_on_429(monkeypatch):
+    from google.genai import errors
+
+    from doctus.llm.gemini import GeminiLLM
+
+    llm = GeminiLLM(api_key="test-key", model="x")
+
+    def boom(**_):
+        def gen():
+            raise errors.APIError(429, {"error": {"code": 429, "details": [{"retryDelay": "8s"}]}})
+            yield  # pragma: no cover
+
+        return gen()
+
+    monkeypatch.setattr(llm._client.models, "generate_content_stream", boom)
+    with pytest.raises(RateLimited) as caught:
+        next(llm.chat_stream("s", []))
+    assert caught.value.retry_after == 8
+
+    class Chunk:
+        def __init__(self, text):
+            self.text = text
+
+    monkeypatch.setattr(
+        llm._client.models,
+        "generate_content_stream",
+        lambda **_: iter([Chunk("Hal"), Chunk(None), Chunk("lo")]),
+    )
+    assert list(llm.chat_stream("s", [])) == ["Hal", "lo"]
+    monkeypatch.setattr(llm._client.models, "generate_content_stream", lambda **_: iter([]))
+    with pytest.raises(LLMError, match="empty"):
+        list(llm.chat_stream("s", []))
+
+
 # ---------- sweep: no 500 anywhere ----------
 
 BAD_IDS = ["0", "-1", str(MISSING), "9223372036854775807", "99999999999999999999", "abc", "1e3"]
@@ -293,54 +303,56 @@ BAD_BODIES = [
     {"message": None},
     {"message": 5},
     {"message": "x" * 8001},
-    {"message": "hi", "from_node_id": "abc"},
-    {"message": "hi", "from_node_id": -1},
-    {"message": "hi", "from_node_id": 99999999999999999999},
     {"message": "\x00 null byte and emoji \U0001f600"},
     {"title": ""},
     {"title": None},
     {"title": "x" * 121},
     {"title": "ok", "goal": "x" * 1001},
     {"title": "\x00"},
+    {"kind": "chat", "text": ""},
+    {"kind": "note", "text": "x" * 20001},
+    {"kind": "map"},
+    {"kind": None, "prompt": None, "note_body": None},
+    {"prompt": "  "},
+    {"prompt": 5},
+    {"note_body": "\x00"},
+    {"from_node_id": "abc"},
     [1, 2, 3],
     "plain string",
-]
-ROUTES = [
-    ("get", "/api/subjects/{id}/graph"),
-    ("get", "/api/subjects/{id}/graph/status"),
-    ("get", "/api/subjects/{id}/proposals"),
-    ("post", "/api/subjects/{id}/skeleton"),
-    ("get", "/api/nodes/{id}"),
-    ("post", "/api/nodes/{id}/chat"),
-    ("post", "/api/nodes/{id}/extract"),
-    ("post", "/api/nodes/{id}/update-graph"),
-    ("post", "/api/proposals/{id}/accept"),
-    ("post", "/api/proposals/{id}/reject"),
 ]
 
 
 def test_sweep_no_500_on_bad_ids_bodies_and_headers(env):
     client, *_ = env
-    _, origin = _subject(client)
+    with client:  # one event-loop portal for the whole sweep (much faster)
+        _sweep(client)
+
+
+def _sweep(client):
+    ids = _setup(client)
     seen = []
     headers_options = [V1, V2, {}, {"X-Doctus-Visitor": "short"}]
-    ids = [*BAD_IDS, str(origin)]
-    for (method, route), raw_id, headers in itertools.product(ROUTES, ids, headers_options):
-        path = route.format(id=raw_id)
-        # Only chat reads a body; other routes get one junk body to prove they ignore it.
-        if route.endswith("/chat"):
-            bodies = BAD_BODIES
-        else:
-            bodies = [None, {"junk": 1}] if method == "post" else [None]
-        for body in bodies:
-            kwargs = {"headers": headers}
-            if body is not None:
-                kwargs["json"] = body
-            res = getattr(client, method)(path, **kwargs)
-            seen.append(res.status_code)
-            assert res.status_code < 500, (method, path, body, headers, res.text[:200])
+    for (method, route, _body), headers in itertools.product(ID_ROUTES, headers_options):
+        real = [str(_owner_id(ids, route)), str(ids["note"]), str(ids["root"]), str(MISSING)]
+        # Bad ids are checked in full as the owner (and per route in the 422 test).
+        for raw in [*(BAD_IDS if headers is V1 else BAD_IDS[:2]), *real]:
+            path = route.format(id=raw)
+            # Every bad body against real ids as the owner; one junk body elsewhere.
+            if method not in ("post", "patch"):
+                bodies = [None]
+            elif headers is V1 and raw in real:
+                bodies = BAD_BODIES
+            else:
+                bodies = [None, {"junk": 1}]
+            for body in bodies:
+                res = _call(client, method, path, body, headers)
+                seen.append(res.status_code)
+                assert res.status_code < 500, (method, path, body, headers, res.text[:200])
     for body in BAD_BODIES:
         for headers in headers_options:
             res = client.post("/api/subjects", json=body, headers=headers)
             assert res.status_code < 500, (body, headers, res.text[:200])
+    for q in ["", " ", "%", "_", "\\", "x" * 201, "\x00"]:
+        res = client.get(f"/api/subjects/{ids['subject']}/search", params={"q": q}, headers=V1)
+        assert res.status_code < 500, (q, res.text[:200])
     assert {404, 409, 422} <= set(seen)
