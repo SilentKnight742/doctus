@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" font-family="system-ui, sans-serif">
+  <!-- A wireframe of the checkout's pet details step (drawn for the Doctus demo). -->
+  <rect width="400" height="260" rx="10" fill="#f4f4f7"/>
+  <rect x="0" y="0" width="400" height="34" rx="10" fill="#e4e4ec"/>
+  <rect x="0" y="24" width="400" height="10" fill="#e4e4ec"/>
+  <circle cx="18" cy="17" r="5" fill="#c4c4d0"/>
+  <circle cx="34" cy="17" r="5" fill="#c4c4d0"/>
+  <circle cx="50" cy="17" r="5" fill="#c4c4d0"/>
+  <text x="200" y="22" font-size="11" fill="#6b6b78" text-anchor="middle">petstore.example / checkout / 2 of 5</text>
+  <g fill="#c4c4d0">
+    <rect x="24" y="50" width="56" height="6" rx="3"/>
+    <rect x="88" y="50" width="56" height="6" rx="3" fill="#6b5bd6"/>
+    <rect x="152" y="50" width="56" height="6" rx="3"/>
+    <rect x="216" y="50" width="56" height="6" rx="3"/>
+    <rect x="280" y="50" width="56" height="6" rx="3"/>
+  </g>
+  <rect x="24" y="72" width="150" height="150" rx="8" fill="#e4e4ec"/>
+  <path d="M60 180 l30 -40 l22 26 l14 -16 l28 30 z" fill="#c4c4d0"/>
+  <circle cx="132" cy="108" r="12" fill="#c4c4d0"/>
+  <text x="194" y="92" font-size="18" font-weight="600" fill="#1b1b22">doggie</text>
+  <rect x="194" y="102" width="70" height="18" rx="9" fill="#dff3e4"/>
+  <text x="229" y="115" font-size="10" fill="#1f7a3a" text-anchor="middle">available</text>
+  <rect x="194" y="132" width="180" height="7" rx="3" fill="#c4c4d0"/>
+  <rect x="194" y="146" width="150" height="7" rx="3" fill="#c4c4d0"/>
+  <rect x="194" y="160" width="165" height="7" rx="3" fill="#c4c4d0"/>
+  <rect x="194" y="186" width="96" height="32" rx="6" fill="#6b5bd6"/>
+  <text x="242" y="206" font-size="12" fill="#ffffff" text-anchor="middle">Reserve</text>
+  <rect x="298" y="186" width="76" height="32" rx="6" fill="none" stroke="#c4c4d0"/>
+  <text x="336" y="206" font-size="12" fill="#6b6b78" text-anchor="middle">Back</text>
+  <text x="24" y="244" font-size="10" fill="#9c9cab">GET /pet/{petId} · shows name, photo, status</text>
+</svg>

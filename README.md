@@ -1,371 +1,178 @@
 # Doctus
 
-*Latin: "one who teaches."*
+A visual workspace where an AI helps you build **worlds** and the
+**connections** between them, on one canvas. The v1 flagship is product
+managers: understanding or improving a product through its endpoints, designs,
+flows and decisions.
 
-Doctus is a learning companion. You chat with a tutor as you would with any
-good AI assistant, and a map of what you explored and were taught grows
-alongside the chat: a branching canvas of conversations, with the
-evidence-backed concepts each one taught.
+> **Status: P0, a clickable prototype.** The UI below runs entirely in the
+> browser on a mock API, and the agents are **scripted demos**, not a model.
+> The data shapes match what the N1 backend will serve. The product was
+> redirected on 2026-11-28; the v1 learning product (tutor, cartographer,
+> concepts) is in git history and its backend is removed in N1.
 
-> **Status:** M4a (the first half of the canvas UI: cards, chat and
-> streaming) is in review; M4b (editing, keys, collapse, zoom levels,
-> concept links, panels, search) follows. See
-> [Implemented vs in progress](#implemented-vs-in-progress).
+![Demo: the space agent builds a Petstore space, reasons become a new world, a world agent edits an endpoint](docs/demo/p0-demo.gif)
 
-![The canvas: an origin chat with branches on both sides](docs/screenshots/m4a/light-canvas.png)
+The same flow as video: [docs/demo/p0-demo.webm](docs/demo/p0-demo.webm)
+(25 s, 2× speed). Screenshots in both themes:
+[docs/screenshots/p0/](docs/screenshots/p0/).
 
-More in [docs/screenshots/m4a/](docs/screenshots/m4a/): both themes, the
-conversation panel and the start page, from a short live Gemini session.
+## The idea
 
-## Design
+- **Space**: one canvas of worlds.
+- **World**: an object on the space canvas. Inside it is its own canvas of
+  widgets, plus its own AI chat.
+- **Widget**: a typed item in a world (note, image, link, table, checklist,
+  OpenAPI endpoint, …), freely placed and resized.
+- **Reason**: one way two worlds relate: a widget in world A ↔ a widget in
+  world B, with a kind, a one-line explanation and an author (AI or user).
+- **Connection**: derived, never drawn. Two worlds are connected iff at least
+  one reason links them; the space canvas draws one line per pair, thicker
+  with more reasons.
 
-- **Exploration canvas, not a roadmap.** A subject is a branching tree that
-  records where the learner actually went, like the trail of a Wikipedia
-  game. It does not lay out a syllabus in advance.
-- **Canvas nodes** form the tree; each has one parent, and the root is the
-  chat where the subject began.
-  - `chat` node: its own conversation with the tutor. A follow-up inside the
-    node continues it; going somewhere new is a child chat node.
-  - `note` node: the learner's own Markdown. No AI.
-  - The learner creates the nodes; the tutor only *suggests* branches.
-- **Concepts** are the evidence layer. The cartographer extracts the
-  concepts *taught* in a chat node. Every concept needs at least one quote
-  copied from that node's conversation; code checks each quote against the
-  stored messages (ignoring case, whitespace and markdown emphasis), and a
-  concept with no verified quote is not created. A concept means taught, not
-  learned. It is homed in the node where it was first taught; teaching it
-  again elsewhere adds evidence to the same concept (names are deduped
-  within the subject).
-- **Concept links** (directed, typed), drawn between the canvas nodes that
-  home their two concepts, so they can cross branches:
-  - `prerequisite`: A must be understood before B; the reason must match the
-    arrow. No cycles.
-  - `related`: adjacent, no direction meaning.
-  - `part_of` is retired: the branch tree is the hierarchy. Old `part_of`
-    edges stay in the database and are left out of the canvas.
-- **Suggestions.** After each exchange the cartographer may offer up to 3
-  follow-up questions for that node. Accepting one creates a child chat node
-  with it as the first question. A suggestion is never a node or a concept
-  until accepted.
-- **Two AI layers** with separate prompts:
-  1. **Tutor**: talks with the learner and never mentions the canvas, nodes
-     or concepts. It sees the node's branch (its ancestors' conversations,
-     oldest trimmed first to a budget and then named by title; sibling
-     branches excluded), notes on that path quoted as the learner's own
-     words, and quiet concept context (what this branch taught, and
-     prerequisites taught elsewhere).
-  2. **Cartographer**: after each full or stopped reply, one call returns the
-     node's concepts with evidence, concept links, the node's title and
-     keyword, and up to 3 suggestions. The title is set from the first
-     exchange and changes only if the topic clearly shifts.
-- **Mastery is not decided.** Strength and decay go through a swappable
-  `MasteryModel` interface; the current `PlaceholderDecayModel` is a stand-in.
+## What the prototype shows
 
-## Implemented vs in progress
+![The space canvas](docs/screenshots/p0/light-space.png)
 
-M4a, canvas UI part 1 (`frontend/`, in review):
+- **Space canvas** (React Flow): worlds as cards (title, summary, widget
+  count, widget types); drag to arrange, positions saved. One line per pair
+  of worlds, its width and label from the reason count.
+- **Connection view**: click a line for a table of its reasons (kind, text,
+  AI/User, both widgets with jump links). Edit, delete, or add a reason.
+  Select reasons **across several connections**; the tray then offers
+  **New world from selection**, which copies (default) or moves the
+  referenced widgets. Copies keep `copied_from` and show where they came
+  from; moved widgets keep all their reasons.
+- **Inside a world**: a canvas of widgets. Drag by the header, resize when
+  selected, double-click (or ✎) to edit in place, × to delete (with its
+  reasons). Each widget shows its reasons (⇄ n) with jumps to the widget in
+  the other world, which is centred and flashed.
+- **Widgets are data-defined.** A widget type is a schema of primitive
+  fields (`text`, `number`, `date`, `bool`, `enum`, `url`, `file`, `ref`,
+  `code`, `list`, `table`) plus a view template (`card`, `table`, `list`,
+  `checklist`, `embed`, `image`). Renderers and editors are generic: one per
+  template and one per primitive. Widget data is validated against its
+  schema on every write, and errors show in the editor.
+- **A type that is not built in**: the space agent defines a **Decision**
+  type for the Petstore space (question, status, owner, due date, options
+  table, outcome) and the Open decisions world uses it, through exactly the
+  same system as the built-ins.
+- **Space-level widgets**: the Space widgets tab holds **Launch readiness**,
+  a tracker (another space-defined type: items with a world reference, owner,
+  status and due date, with a progress bar).
+- **Space chat and world chat** with scripted agents. Suggested prompts are
+  shown as chips; the reply streams, and every tool call shows as a line
+  (✓ or a rejection). The canvas updates as the agent works, and Stop keeps
+  what was done so far. The space agent can instruct a world agent; that
+  exchange appears in the world's chat.
+  - Empty space: "I'm a PM improving the Swagger Petstore API" builds six
+    worlds, 22 widgets, the Decision and Tracker types, 13 reasons and
+    the tracker.
+  - Space: find more links between Checkout and Store; update launch
+    readiness from the worlds.
+  - Pets endpoints: add the 404 response to `GET /pet/{petId}`.
+  - Open decisions: turn the open questions into a checklist.
+  - Any world: tidy into a grid.
+  - Anything else gets a short "this is a scripted prototype" reply.
 
-- A slim left rail (maps, new map, theme) and one canvas per map. The map
-  name can be renamed in place and is the browser tab title.
-- One layout: the root's children are split, the first half down the right
-  side and the rest back up the left, so the canvas reads clockwise. Each
-  side is a tidy tree laid out from the cards' measured sizes. When the tree
-  grows, nodes slide to their new places and the selected node stays where
-  it is on screen; a new branch is panned into view if it lands off screen.
-- Plain background (no grid or dots), curved connectors, React Flow
-  controls, zoom out to 15%.
-- Chat cards: the cartographer's title, the prompt, and the conversation in
-  an area of about nine lines that scrolls (wide tables scroll sideways), a
-  follow-up input, and "↳ Branch" to ask in a new child node instead.
-  "Open" shows the full conversation in a side panel. The origin has an
-  accent ring; new nodes briefly highlight.
-- Concept chips: every concept taught in the node. Concepts first taught
-  there are filled; concepts taught again there (with a verified quote) are
-  outlined with ↩ and jump to their home node.
-- Suggestions as faint chips under a chat node; clicking one creates the
-  child and streams its answer.
-- Streaming with a Stop button (and Ctrl+Esc). Node states: "Not answered
-  yet" with an Answer button, and, when the cartographer failed on a node,
-  a marker with Retry (`/extract`). Errors: 429 "Rate limited, try again in
-  N s", 503 "The model is busy, try again in a moment", 502 the model's
-  failure.
-- After each reply the UI polls `/canvas/status` until the cartographer is
-  idle, refreshing the canvas as `graph_version` changes.
-- "Context used" toggle on replies received in the current session.
-- Canvas shortcuts fire only when no text field is focused: Shift+1 zoom to
-  fit, Ctrl+Esc stop, Esc deselect.
-- Light and dark themes; every value is a variable in
-  `frontend/src/theme.css` (indigo accent, provisional until a design pass).
+Inside a world, and the space-defined Decision type:
 
-M3, branch canvas (backend, merged):
+![Inside the Pets endpoints world](docs/screenshots/p0/light-world.png)
+![Decisions (a space-defined type)](docs/screenshots/p0/dark-decisions.png)
 
-- `canvas_nodes` tree (one parent, one root per subject, no move operation,
-  so no cycles), `suggestions`, `messages.canvas_node_id` and `stopped`,
-  `nodes.home_canvas_node_id`. Schema version via `PRAGMA user_version`;
-  the migration gives each existing subject one root chat node holding all
-  its messages (M1/M2 per-concept chats merged in id order; dev data) and
-  keeps a copy of the old database as `doctus.db.pre-m3`.
-- Endpoints for the canvas, child/sibling nodes, note and prompt edits,
-  note/chat switching before an answer, branch delete with confirmation,
-  subject rename, suggestions, branch path, search, and streamed replies with
-  stop (see [API](#api)). Every canvas change bumps `graph_version`.
-- Each canvas node lists every concept taught in it: concepts first taught
-  there (`home: true`) and concepts taught again there with a verified
-  evidence quote. `extract_pending` marks replies the cartographer has not
-  processed yet.
-- A Gemini 503 (model overloaded) is handled like a 429: HTTP 503 with
-  `Retry-After`, or `status: 503` in a streamed `error` event.
-- Deleting a branch deletes concepts left with no evidence and rehomes
-  concepts that still have evidence elsewhere.
-- Tutor replies stream as server-sent events; a stopped reply keeps what was
-  written, and the cartographer runs only after the stream has finished.
+## How the prototype works
 
-Implemented earlier:
+- `frontend/src/api/client.ts` defines `DoctusApi`, the interface every
+  screen uses. In P0 it is backed by `frontend/src/mock/`; N1 adds an HTTP
+  implementation of the same interface.
+- `mock/db.ts` holds the data and every rule: schema validation, the evidence
+  rule (a reason needs two existing widgets in worlds of one space), cascades
+  (widget → its reasons; world → its widgets), connection derivation, copy vs
+  move. Pure TypeScript with unit tests, as a spec for N1.
+- `mock/agents/` holds the tools the N2 agents will have
+  (`create_world`, `create_widget`, `update_widget`, `add_reason`,
+  `define_type`, `arrange_widgets`, …) and the scripted runner. Tool calls go
+  through the same validation as the UI; a world agent may only touch its own
+  world. The seed is the headline script played instantly, so the seeded
+  space and the live demo match.
+- Data is kept in `localStorage` under a schema version
+  (`doctus.proto.version`). When the version changes, the saved data is
+  dropped and the seed is loaded again. Every storage access is guarded;
+  without storage the data lives in memory. **Reset demo** (left rail)
+  reloads the seed.
 
-- SQLite store (WAL) with anonymous visitor scoping (`X-Doctus-Visitor`
-  header).
-- LLM layer: Gemini and a deterministic `FakeLLM`; structured output is
-  validated with Pydantic and retried once.
-- **Tutor** and **cartographer** as separate layers with separate prompts.
-  The cartographer can use its own model (`DOCTUS_GRAPH_MODEL`).
-- The cartographer runs after every exchange, in the background, so the
-  reply is never delayed. Runs are serialised per subject; messages that
-  arrive during a run get one more run right after it. Every run also sweeps
-  the subject for any chat node whose latest reply was never processed, so a
-  node whose own run failed (for example a 429), hit an unexpected error or
-  was lost to a restart is picked up by the next run anywhere in the
-  subject. A failed node is not retried within the same run, and its error
-  stays reported even if later nodes succeed. Clients poll
-  `graph_version` and `cartographer: idle | running | error`.
-- Evidence check on every node except the origin; no suggestion or
-  frontier nodes.
-- Edge kinds `prerequisite`, `part_of` and `related`; one `part_of` parent
-  per node; cycle checks per directed kind.
-- Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
-  and the shortest `path` between two nodes.
-- Trail with `from_node_id`; distance from the origin.
-- 314 backend offline tests; opt-in live Gemini tests. 19 frontend unit
-  tests (Vitest: API client and SSE parsing, canvas layout, visitor token).
-
-M2, UI (merged; replaced by M4): React + TypeScript + Vite, React Flow. It
-used the concept-chat endpoints that M3 removed; its build setup, CI, API
-client pattern, Markdown and composer were kept, and its screens were
-removed in M4a. What it had:
-
-- Subject list and a "start a subject" form.
-- Chat screen: markdown replies (tables, code), Enter to send and
-  Shift+Enter for a new line, a pending indicator, clear errors (429 shows
-  "rate limited, try again in N s"), a trail breadcrumb, a node detail
-  drawer (summary, evidence quotes, connections) and a live mini graph.
-- Graph screen: the full graph; selecting a node opens its chat in a
-  floating window (minimise, close, expand to the chat screen). Opening a
-  chat records a trail step (`POST /api/nodes/{id}/visit`).
-- Semantic zoom by size: a node at `part_of` depth d is drawn at
-  S(d) = 160 px × 0.75^d. When S(d) × zoom drops below 48 px it merges into
-  its nearest visible `part_of` ancestor, which stays under its own name
-  and grows with the square root of what it holds (capped). It splits out
-  again above 48 × 1.15 px. The origin and its direct parts, and any node
-  without a `part_of` parent, never merge, and the furthest zoom-out is
-  48 / 160 = 0.3. Edges inside a group are hidden; parallel edges between
-  groups are merged into one thicker line. The constants are in
-  `frontend/src/theme.css`.
-- Layout: radial seed (origin at the centre, `part_of` children around
-  their parent, other topics on rings by distance) relaxed by a short,
-  deterministic spring pass. Positions are kept as the graph grows; "Tidy
-  layout" recomputes them.
-- After each message the UI polls `/graph/status` until the cartographer is
-  idle, then refreshes the graph; new nodes briefly highlight.
-- "Context used" toggle on replies received in the current session.
-- Light and dark themes with neutral placeholder styling. The visual design
-  is not decided: every colour, font, size, radius and spacing value is a
-  CSS variable in `frontend/src/theme.css`.
+Endpoint data follows the public Swagger Petstore (OpenAPI 3) sample. Team
+names, tickets, numbers and the checkout wireframe are invented for the demo.
 
 ## Run it
 
-Needs [uv](https://docs.astral.sh/uv/), Node 24 with npm, and GNU Make.
+Needs Node 24 with npm (and GNU Make). The prototype needs no backend and no
+API key.
 
 ```bash
-cp backend/.env.example backend/.env   # then add GEMINI_API_KEY
-make dev                               # UI at http://localhost:5173, API docs at :8000/docs
+cd frontend && npm ci && npm run dev    # http://localhost:5173
 ```
-
-`make dev` starts the backend and the Vite dev server together (Vite
-proxies `/api`); Ctrl-C stops both. The browser keeps its anonymous visitor
-token in `localStorage` (in memory when storage is unavailable).
-
-Offline, with canned model answers and no key:
-
-```bash
-cd backend && DOCTUS_LLM=fake uv run uvicorn doctus.main:app --reload
-```
-
-Every request needs an `X-Doctus-Visitor` header (any string of 16+
-characters).
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `GEMINI_API_KEY` | empty | Gemini API key |
-| `DOCTUS_LLM` | `gemini` | `gemini` or `fake` |
-| `DOCTUS_GEMINI_MODEL` | `gemini-3.5-flash-lite` | Any Gemini model your key can use |
-| `DOCTUS_GRAPH_MODEL` | empty (= chat model) | Model for the cartographer |
-| `DOCTUS_DB` | `doctus.db` | SQLite file (relative to `backend/`) |
-| `DOCTUS_CONTEXT_CHARS` | `24000` | Characters of branch conversation sent to the tutor; older ancestor nodes are trimmed whole beyond this |
-
-Real environment variables win over `backend/.env`.
 
 ## Tests and lint
 
 ```bash
-make test   # backend (FakeLLM, no API key) and frontend (Vitest) tests
-make lint   # ruff check, ruff format --check, oxlint, tsc
-make build  # production build of the frontend
-make fmt    # apply ruff fixes and formatting (backend)
+make test-frontend   # Vitest: schema validation, mock rules, agent scripts, storage
+make lint-frontend   # oxlint and tsc
+make test            # also runs the v1 backend tests (until N1 removes them)
 ```
 
-Screenshots of a running dev session (not part of CI; uses Playwright,
-optionally with a system Chromium):
+Screenshots and the demo recording (not part of CI; Playwright, optionally
+with a system Chromium; the dev server must be running):
 
 ```bash
-cd frontend && CHROMIUM_PATH=/usr/bin/chromium node scripts/screenshots.mjs \
-  --subject 1 --visitor <token> --out screenshots --theme dark --select <node> --open <node>
+cd frontend
+CHROMIUM_PATH=/usr/bin/chromium node scripts/screenshots.mjs --out ../docs/screenshots/p0 --theme light
+CHROMIUM_PATH=/usr/bin/chromium node scripts/record-demo.mjs --out ../docs/demo
+python3 scripts/frames-to-gif.py ../docs/demo/frames ../docs/demo/p0-demo.gif \
+  --video ../docs/demo/p0-demo.webm --ffmpeg ~/.cache/ms-playwright/ffmpeg-1011/ffmpeg-linux
 ```
 
-The opt-in live test makes one real chat call and one structured call:
-
-```bash
-cd backend && uv run python -m pytest -m live
-```
-
-## API
-
-```
-GET    /api/subjects                          list your subjects
-POST   /api/subjects                          {title, goal?, first_question?} -> subject
-                                              (with root_canvas_node_id)
-PATCH  /api/subjects/{id}                     {title}: rename
-
-GET    /api/subjects/{id}/canvas              nodes (with messages, concepts taught there
-                                              with a home flag, extract_pending),
-                                              links mapped to node pairs, open
-                                              suggestions, graph_version, cartographer
-GET    /api/subjects/{id}/canvas/status       {graph_version, cartographer, error} (poll this)
-GET    /api/subjects/{id}/search?q=           hits in titles, messages, notes, concepts:
-                                              {canvas_node_id, field, snippet}
-
-GET    /api/canvas-nodes/{id}                 detail: messages, concepts with evidence,
-                                              links, concepts also taught here, suggestions
-GET    /api/canvas-nodes/{id}/path            root-to-node chain as one document
-POST   /api/canvas-nodes/{id}/children        {kind: chat|note, text} -> new last child
-POST   /api/canvas-nodes/{id}/siblings        {kind, text} -> new node right after this one
-PATCH  /api/canvas-nodes/{id}                 {kind?, prompt?, note_body?}: kind and prompt
-                                              only before the node has an answer (409 after)
-DELETE /api/canvas-nodes/{id}[?confirm=branch]  a node with children needs confirm=branch;
-                                              the root cannot be deleted
-POST   /api/canvas-nodes/{id}/chat            {message?} -> SSE stream (below); no message
-                                              answers the node's waiting question
-POST   /api/canvas-nodes/{id}/stop            stop the reply being written (409 if none)
-POST   /api/canvas-nodes/{id}/extract         run the cartographer now (409 while one runs)
-POST   /api/suggestions/{id}/accept           -> new child chat node with that question
-
-# M1/M2 concept views, kept read-only, and the older starter-map flow:
-GET    /api/subjects/{id}/graph[/status]      concepts, edges, trail, run stats
-GET    /api/nodes/{id}                        one concept: evidence (with canvas node), edges
-POST   /api/nodes/{id}/visit                  {from_node_id?}: record a trail step
-POST   /api/subjects/{id}/skeleton            propose a starter map
-GET    /api/subjects/{id}/proposals           pending proposals
-POST   /api/proposals/{id}/accept|reject
-```
-
-Starting a subject: either send `first_question` with `POST /subjects` and
-then `POST /canvas-nodes/{root}/chat` with no message, or create it empty and
-send the first `/chat {message}` on the root.
-
-The chat stream is `text/event-stream`:
-
-```
-event: start   data: {user_message_id, context_used}
-event: delta   data: {text}                        (repeated)
-event: done    data: {message_id, stopped, graph_version, cartographer, error}
-event: error   data: {status, message, retry_after?, message_id}   (failure mid-reply)
-```
-
-The question is saved before the model is called. A failure before the
-first piece is a plain HTTP error (429 with `Retry-After` for rate limits,
-503 with `Retry-After` when the model is busy, 502 otherwise) and leaves the question waiting, so the client can retry with
-no message or edit it. A stop (or a dropped connection, or a failure
-mid-reply) saves what was written as a reply with `stopped: true`. The
-cartographer starts after the stream has finished; poll `/canvas/status`
-until `cartographer` is `idle` (or `error`), then fetch `/canvas`.
-
-**Single worker.** Replies in progress and their stop flags are kept in
-process memory, as are cartographer runs, so run one server process (the
-default `uvicorn` command). Several workers against one database would not
-see each other's streams or runs.
+`record-demo.mjs` captures Chrome's screencast frames with their timestamps;
+`frames-to-gif.py` (Pillow) builds the GIF and pipes the frames to ffmpeg for
+the video. The small ffmpeg that Playwright ships can write `.webm`. An
+`.mp4` needs a full ffmpeg (`--video …/p0-demo.mp4 --ffmpeg ffmpeg`).
 
 ## Layout
 
 ```
-backend/
-  src/doctus/
-    api.py           HTTP endpoints
-    tutor.py         the tutor layer: prompt and chat call
-    cartographer.py  the cartographer layer: evidence-checked concepts, links,
-                     title/keyword, suggestions; background runs
-    store.py         SQLite storage, migration, canvas tree, visitor scoping,
-                     edge rules, traversal, search
-    graph.py         distance from origin; older proposal flow
-    context.py       the tutor's branch context (trimming, notes, concepts)
-                     and the "context used" record
-    mastery.py       swappable mastery model (placeholder rule)
-    prompts.py       prompts and structured-output schemas
-    llm/             provider interface, Gemini, fake model for tests
-  tests/
-frontend/
-  src/
-    api/             typed client (visitor header, 429/503 + Retry-After), SSE parser
-    canvas/          layout, React Flow canvas, cards, concept chips, side panel
-    chat/            composer, markdown, messages, context used
-    screens/         start page, map screen
-    shell/           app shell with the left rail
-    state/           streamed replies, stop, cartographer polling
-    theme.css        all design tokens (provisional palette)
-docs/eval/         small pilot results (not benchmarks)
+frontend/src/
+  api/        DoctusApi interface, v2 data shapes, errors (429/503 + Retry-After), SSE parser
+  mock/       in-browser db and rules, persistence, seed, mock API
+    agents/   agent tools, scripted runner, the Petstore scripts
+  schema/     built-in widget types, the Decision and Tracker types, validation
+  widgets/    renderers per view template, field display/editors per primitive
+  space/      space canvas, world cards, connection lines and view, new world dialog,
+              space widgets
+  world/      world canvas, widget nodes (drag, resize, edit, reasons)
+  chat/       chat panel, messages with tool lines, composer, markdown
+  shell/      left rail, side panel
+  theme.css   design tokens, light and dark
+backend/      the v1 learning backend, removed in N1
 ```
 
-## Current limits
+## Next
 
+N1 data model and API (FastAPI + SQLite, the same shapes), N2 space and world
+agents (Gemini by default; Anthropic and OpenAI; bring your own key), N3/N4
+connect these screens to the real API, N5 OpenAPI import, uploads and an MCP
+server. See `CLAUDE.md`.
+
+## Current limits (prototype)
+
+- Agents are scripted: only the suggested prompts do anything.
+- Data lives in one browser; there is no server and no sharing.
+- Uploaded images are stored inline in `localStorage` (a few MB at most).
+- The generic `table` widget has up to five text columns, named by its
+  `columns` list; user-defined column types come with user-defined widget
+  types.
+- Widget references (`ref`) are shown and edited for worlds; widget-to-widget
+  references are supported by the schema but not used in the seed.
 - The palette is provisional; a design pass comes later.
-- Until M4b: no creating notes or siblings, editing, deleting, keyboard
-  navigation, context menu, collapse, zoom text levels, concept links on the
-  canvas, node detail panel, branch document or search in the UI.
-- With an odd number of root branches the middle one switches sides when
-  another root branch is added (first half right, rest left).
-- "Context used" is only shown for replies received in the current page
-  session.
-- A reply cut off by an error stays as a stopped partial answer; ask a
-  follow-up to continue.
-- Duplicate detection is by normalised name only; near-synonyms can become
-  separate nodes.
-- The evidence check proves a quote is in the chat, not that the concept was
-  taught well; the model still chooses which concepts to record.
-- The tutor on `gemini-3.5-flash-lite` makes small factual slips (5 in about
-  16 replies in testing). The evidence check proves a quote is in the chat,
-  not that what it says is correct. A stronger tutor model is planned.
-- Narrative subjects (for example a TV episode) produce plot or cause links
-  rather than learning dependencies.
-- Tests and mastery updates are not wired to endpoints yet.
-- Single process, SQLite, no accounts (anonymous visitor tokens).
-- Free-tier Gemini rate limits are low. Each exchange is two calls (tutor
-  and cartographer), so a burst of messages can return 429.
-- Cartographer runs and streamed replies are coordinated in process memory;
-  running several server processes against one database is not supported.
-- A stop takes effect at the next piece the model sends, not instantly.
-- A note's keyword is simply its title's first word (no model call).
-
-## Pilot results
-
-Small hand-run pilots are in
-[docs/eval/](docs/eval/). They are not benchmarks.
 
 ## License
 

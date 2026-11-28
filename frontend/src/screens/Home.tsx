@@ -1,77 +1,53 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router'
 import { api, describeError } from '../api/client'
-import { useStreams } from '../state/streams-context'
 
-/** Start a new map: a title and the first question (the root chat). */
 export function Home() {
-  const qc = useQueryClient()
-  const nav = useNavigate()
-  const { ask } = useStreams()
+  const navigate = useNavigate()
+  const spaces = useQuery({ queryKey: ['spaces'], queryFn: api.listSpaces })
   const [title, setTitle] = useState('')
-  const [question, setQuestion] = useState('')
-  useEffect(() => {
-    document.title = 'Doctus'
-  }, [])
   const create = useMutation({
-    mutationFn: () => api.createSubject(title.trim(), question.trim()),
-    onSuccess: (s) => {
-      void qc.invalidateQueries({ queryKey: ['subjects'] })
-      void ask(s.id, s.root_canvas_node_id, null)
-      nav(`/s/${s.id}`)
-    },
+    mutationFn: () => api.createSpace(title.trim() || 'Untitled space'),
+    onSuccess: (s) => navigate(`/s/${s.id}`),
   })
-  const ready = title.trim() && question.trim()
 
   return (
     <div className="home">
-      <section className="home-card">
-        <h1 className="home-title">What do you want to learn?</h1>
+      <div className="home-card">
+        <h1 className="home-title">Spaces</h1>
         <p className="muted">
-          Ask anything. Each question you follow becomes a branch on your map, and the concepts you were taught are
-          collected as you go.
+          A space is one canvas of <strong>worlds</strong>. Each world holds widgets (endpoints, notes, screenshots,
+          tables, decisions) and its own AI chat. Worlds connect through <strong>reasons</strong>: one widget here relates
+          to one widget there, and why.
         </p>
+        <ul className="space-list">
+          {spaces.data?.map((s) => (
+            <li key={s.id}>
+              <Link to={`/s/${s.id}`} className="space-card">
+                <span className="space-card-title">{s.title}</span>
+                {s.description && <span className="muted small">{s.description}</span>}
+              </Link>
+            </li>
+          ))}
+        </ul>
         <form
-          className="stack"
+          className="new-space"
           onSubmit={(e) => {
             e.preventDefault()
-            if (ready) create.mutate()
+            create.mutate()
           }}
         >
-          <label className="field">
-            <span>Map name</span>
-            <input
-              value={title}
-              maxLength={120}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="German grammar"
-            />
-          </label>
-          <label className="field">
-            <span>First question</span>
-            <textarea
-              value={question}
-              maxLength={8000}
-              rows={3}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault()
-                  if (ready) create.mutate()
-                }
-              }}
-              placeholder="How do German cases work?"
-            />
-          </label>
-          <div>
-            <button className="button primary" disabled={!ready || create.isPending}>
-              {create.isPending ? 'Starting…' : 'Start'}
-            </button>
-          </div>
-          {create.error && <p className="error-banner">{describeError(create.error)}</p>}
+          <input aria-label="New space title" placeholder="New space title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <button type="submit" className="button primary" disabled={create.isPending}>
+            New empty space
+          </button>
         </form>
-      </section>
+        {create.error && <p className="form-error">{describeError(create.error)}</p>}
+        <p className="muted small home-note">
+          Prototype: everything is stored in this browser, and the agents are scripted demos, not a model.
+        </p>
+      </div>
     </div>
   )
 }

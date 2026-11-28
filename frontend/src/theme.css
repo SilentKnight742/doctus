@@ -94,7 +94,8 @@
 
   /* ---- layout sizes ---- */
   --rail-width: 220px;
-  --panel-width: 440px;
+  --panel-width: 400px;
+  --panel-width-wide: 600px;
   --home-width: 36rem;
   --composer-max-height: 240px;
 
@@ -174,4 +175,86 @@
   --color-fresh: rgba(139, 124, 240, 0.4);
   --color-suggestion: #8e8e9e;
   --color-suggestion-border: #3a3a46;
+}
+
+/* ---- v2 prototype tokens (worlds, widgets, badges) ---- */
+:root {
+  --world-indigo: #6b5bd6;
+  --world-teal: #1f9d8f;
+  --world-amber: #c98a12;
+  --world-rose: #d0507a;
+  --world-sky: #2f86d6;
+  --world-olive: #7a8f2a;
+  --world-slate: #6b7280;
+
+  --tone-info-bg: #e6f0fb;
+  --tone-info-text: #1d5fa8;
+  --tone-success-bg: #e3f4e8;
+  --tone-success-text: #1f7a3a;
+  --tone-warn-bg: #fdf0dc;
+  --tone-warn-text: #94590a;
+  --tone-danger-bg: #fdeaea;
+  --tone-danger-text: #b42318;
+  --tone-muted-bg: #efeff3;
+  --tone-muted-text: #6b6b78;
+
+  --color-line: #a9a9bb;
+  --color-line-open: var(--color-accent);
+  --color-line-selected: #c98a12;
+  --color-ai: var(--color-accent-soft);
+  --color-ai-text: var(--color-accent-soft-text);
+  --color-sheet-shadow: rgba(24, 24, 40, 0.1);
+
+  --world-card-width: 260px;
+  --world-card-height: 150px;
+  --sheet-height: 42%;
+  --widget-head-height: 2.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --world-indigo: #8b7cf0;
+    --world-teal: #3cc2b2;
+    --world-amber: #e3a93a;
+    --world-rose: #e8789c;
+    --world-sky: #5aa6ee;
+    --world-olive: #a3b84a;
+    --world-slate: #9ca3af;
+    --tone-info-bg: #1b2c40;
+    --tone-info-text: #8cc0f5;
+    --tone-success-bg: #17301f;
+    --tone-success-text: #7fd39a;
+    --tone-warn-bg: #3a2a12;
+    --tone-warn-text: #f5c06c;
+    --tone-danger-bg: #3a1a17;
+    --tone-danger-text: #f9a19a;
+    --tone-muted-bg: #2a2a33;
+    --tone-muted-text: #a0a0ae;
+    --color-line: #5a5a6c;
+    --color-line-selected: #e3a93a;
+    --color-sheet-shadow: rgba(0, 0, 0, 0.45);
+  }
+}
+
+:root[data-theme='dark'] {
+  --world-indigo: #8b7cf0;
+  --world-teal: #3cc2b2;
+  --world-amber: #e3a93a;
+  --world-rose: #e8789c;
+  --world-sky: #5aa6ee;
+  --world-olive: #a3b84a;
+  --world-slate: #9ca3af;
+  --tone-info-bg: #1b2c40;
+  --tone-info-text: #8cc0f5;
+  --tone-success-bg: #17301f;
+  --tone-success-text: #7fd39a;
+  --tone-warn-bg: #3a2a12;
+  --tone-warn-text: #f5c06c;
+  --tone-danger-bg: #3a1a17;
+  --tone-danger-text: #f9a19a;
+  --tone-muted-bg: #2a2a33;
+  --tone-muted-text: #a0a0ae;
+  --color-line: #5a5a6c;
+  --color-line-selected: #e3a93a;
+  --color-sheet-shadow: rgba(0, 0, 0, 0.45);
 }
