@@ -6,7 +6,7 @@ import itertools
 import pytest
 
 from conftest import V1, V2, chat, child, make_client, new_subject
-from doctus.llm import LLMError, RateLimited
+from doctus.llm import LLMError, ModelBusy, RateLimited
 
 MISSING = 987654
 
@@ -251,7 +251,7 @@ def test_gemini_client_raises_rate_limited_on_429(monkeypatch):
     assert caught.value.retry_after == 12
 
     def other(**_):
-        raise errors.APIError(503, {"error": {"code": 503}})
+        raise errors.APIError(500, {"error": {"code": 500}})
 
     monkeypatch.setattr(llm._client.models, "generate_content", other)
     with pytest.raises(LLMError) as caught:
@@ -356,3 +356,48 @@ def _sweep(client):
         res = client.get(f"/api/subjects/{ids['subject']}/search", params={"q": q}, headers=V1)
         assert res.status_code < 500, (q, res.text[:200])
     assert {404, 409, 422} <= set(seen)
+
+
+def test_gemini_503_maps_to_model_busy_with_retry_after(monkeypatch):
+    from google.genai import errors
+
+    from doctus.llm.gemini import BUSY_RETRY_AFTER, GeminiLLM
+
+    llm = GeminiLLM(api_key="test-key", model="x")
+
+    def busy(**_):
+        raise errors.APIError(503, {"error": {"code": 503, "status": "UNAVAILABLE"}})
+
+    monkeypatch.setattr(llm._client.models, "generate_content", busy)
+    with pytest.raises(ModelBusy) as caught:
+        llm.chat("s", [])
+    assert caught.value.retry_after == BUSY_RETRY_AFTER
+    assert not isinstance(caught.value, RateLimited)
+
+    def busy_stream(**_):
+        def gen():
+            raise errors.APIError(503, {"error": {"code": 503, "details": [{"retryDelay": "4s"}]}})
+            yield  # pragma: no cover
+
+        return gen()
+
+    monkeypatch.setattr(llm._client.models, "generate_content_stream", busy_stream)
+    with pytest.raises(ModelBusy) as caught:
+        next(llm.chat_stream("s", []))
+    assert caught.value.retry_after == 4
+
+
+def test_model_busy_maps_to_503_with_retry_after(env):
+    client, llm, store = env
+    s, root = new_subject(client)
+    llm.queue_chat(ModelBusy("Gemini is busy (model overloaded); try again in a moment.", 15))
+    res = chat(client, root, "x")
+    assert res.status_code == 503 and res.headers["retry-after"] == "15"
+    assert "busy" in res.json()["detail"]
+
+    store.add_canvas_message(root, "assistant", "hi")
+    llm.queue_json(ModelBusy("Gemini is busy (model overloaded); try again in a moment.", 7))
+    res = client.post(f"/api/canvas-nodes/{root}/extract", headers=V1)
+    assert res.status_code == 503 and res.headers["retry-after"] == "7"
+    status = client.get(f"/api/subjects/{s['id']}/canvas/status", headers=V1).json()
+    assert status["cartographer"] == "error" and "busy" in status["error"]

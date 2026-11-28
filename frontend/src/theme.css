@@ -1,50 +1,55 @@
 /*
- * Theme tokens. Visual direction is NOT decided yet: these are neutral
- * placeholders. Every colour, font, size, radius and spacing value the app
- * uses is defined here, and components refer only to these variables, so a
- * design can replace this file without touching components.
+ * Theme tokens. Every colour, font, size, radius, spacing and timing value
+ * the app uses is defined here; components refer only to these variables.
+ *
+ * The palette is provisional (2026-11-23): an indigo accent, distinct from
+ * mindmap.io's teal, until the design pass.
  */
 
 :root {
   color-scheme: light;
 
   /* ---- colour: surfaces and text ---- */
-  --color-bg: #f4f4f5;
+  --color-bg: #f6f6f8;
   --color-surface: #ffffff;
-  --color-surface-2: #ececee;
-  --color-surface-hover: #e4e4e7;
-  --color-text: #18181b;
-  --color-text-muted: #6b6b73;
-  --color-text-inverse: #ffffff;
-  --color-border: #dcdce0;
-  --color-border-strong: #a1a1aa;
-  --color-focus: #52525b;
-  --color-overlay-shadow: rgba(0, 0, 0, 0.14);
+  --color-surface-2: #f0f0f4;
+  --color-surface-hover: #e9e9ef;
+  --color-text: #1b1b22;
+  --color-text-muted: #6b6b78;
+  --color-text-faint: #9c9cab;
+  --color-border: #e2e2ea;
+  --color-border-strong: #c4c4d0;
+  --color-focus: #6b5bd6;
+  --color-overlay-shadow: rgba(24, 24, 40, 0.08);
+  --color-card-shadow: rgba(24, 24, 40, 0.06);
 
   /* ---- colour: roles ---- */
-  --color-accent: #3f3f46;
+  --color-accent: #6b5bd6;
+  --color-accent-hover: #5a4ac4;
   --color-accent-text: #ffffff;
-  --color-origin: #71717a;
-  --color-current: #27272a;
-  --color-new: #a1a1aa;
+  --color-accent-soft: #eeebfc;
+  --color-accent-soft-text: #4b3db0;
   --color-danger: #b42318;
   --color-danger-bg: #fdecea;
-  --color-user-bubble: #e4e4e7;
-  --color-code-bg: #ececee;
+  --color-warn: #b25e09;
+  --color-warn-bg: #fef3e2;
+  --color-user-bubble: #f0f0f4;
+  --color-code-bg: #f0f0f4;
 
-  /* ---- colour: graph ---- */
-  --color-canvas: #f4f4f5;
-  --color-canvas-dots: #d4d4d8;
-  --color-node-bg: #ffffff;
-  --color-node-border: #c4c4cc;
-  --color-edge-prerequisite: #71717a;
-  --color-edge-part-of: #b4b4bc;
-  --color-edge-related: #a1a1aa;
+  /* ---- colour: canvas ---- */
+  --color-canvas: #f6f6f8;
+  --color-connector: #c9c9d6;
+  --color-card-selected: #6b5bd6;
+  --color-origin-ring: #b9b0f0;
+  --color-fresh: rgba(107, 91, 214, 0.35);
+  --color-suggestion: #8a8a99;
+  --color-suggestion-border: #d8d8e2;
 
   /* ---- typography ---- */
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-prose: var(--font-sans);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-size-2xs: 0.6875rem;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.8125rem;
   --font-size-md: 0.9375rem;
@@ -54,7 +59,7 @@
   --font-weight-medium: 500;
   --font-weight-bold: 600;
   --line-height-tight: 1.3;
-  --line-height-prose: 1.6;
+  --line-height-prose: 1.55;
 
   /* ---- spacing ---- */
   --space-1: 0.25rem;
@@ -69,109 +74,104 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-card: 14px;
   --radius-pill: 999px;
   --border-width: 1px;
   --border-width-strong: 2px;
   --shadow-overlay: 0 8px 28px var(--color-overlay-shadow);
+  --shadow-card: 0 1px 3px var(--color-card-shadow), 0 4px 14px var(--color-card-shadow);
 
-  /* ---- graph sizes ---- */
-  /* Semantic zoom (unitless; read by src/graph/zoom.ts):
-     node base size S(d) = base * ratio^d px; a node merges into its nearest
-     visible part_of ancestor when S(d) * zoom < min-screen, and splits again
-     above min-screen * split-factor. Groups grow by
-     min(1 + group-growth * sqrt(n), group-cap). Max zoom-out = min-screen / base. */
-  --zoom-node-base: 160;
-  --zoom-node-ratio: 0.75;
-  --zoom-min-screen: 48;
-  --zoom-split-factor: 1.15;
-  --zoom-group-growth: 0.2;
-  --zoom-group-cap: 1.5;
-  /* A node's text and padding scale with its size (set per node as --node-scale). */
-  --node-font-size: 15px;
-  --node-padding-y: 9px;
-  --node-padding-x: 12px;
-  --edge-width-prerequisite: 1.5px;
-  --edge-width-part-of: 1px;
-  --edge-width-related: 1.25px;
-  --edge-dash-related: 5 4;
+  /* ---- canvas sizes (read by src/canvas: px) ---- */
+  --card-width: 380px;
+  --note-width: 300px;
+  /* The answer area of a card: about 9 lines of prose, then it scrolls. */
+  --card-body-max-height: 13.5rem;
+  --card-prompt-lines: 3;
+  --connector-width: 1.5px;
+  /* Table cells keep words whole; a table wider than its card scrolls sideways. */
+  --table-cell-min: 4.5rem;
+  --table-cell-max: 16rem;
 
   /* ---- layout sizes ---- */
   --rail-width: 220px;
-  --chat-column: 46rem;
-  --window-width: 420px;
-  --window-height: 580px;
-  --window-header: 44px;
-  --mini-graph-width: 240px;
-  --mini-graph-height: 170px;
-  --drawer-width: 340px;
+  --panel-width: 440px;
+  --home-width: 36rem;
+  --composer-max-height: 240px;
 
   /* ---- motion ---- */
   --duration-fast: 120ms;
+  /* Sibling moves when the tree grows (also the viewport pan that keeps the selection still). */
+  --duration-layout: 320ms;
   --duration-new-highlight: 2500ms;
-  --duration-group: 320ms;
   --duration-typing: 1.2s;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
-    --color-bg: #141416;
-    --color-surface: #1c1c1f;
-    --color-surface-2: #26262a;
-    --color-surface-hover: #2e2e33;
-    --color-text: #ececee;
-    --color-text-muted: #9a9aa3;
-    --color-text-inverse: #18181b;
-    --color-border: #303035;
-    --color-border-strong: #52525b;
-    --color-focus: #a1a1aa;
-    --color-overlay-shadow: rgba(0, 0, 0, 0.5);
-    --color-accent: #d4d4d8;
-    --color-accent-text: #18181b;
-    --color-origin: #a1a1aa;
-    --color-current: #e4e4e7;
-    --color-new: #71717a;
+    --color-bg: #151519;
+    --color-surface: #1e1e24;
+    --color-surface-2: #26262e;
+    --color-surface-hover: #2e2e38;
+    --color-text: #ececf1;
+    --color-text-muted: #a0a0ae;
+    --color-text-faint: #6e6e7c;
+    --color-border: #30303a;
+    --color-border-strong: #4a4a58;
+    --color-focus: #a597f5;
+    --color-overlay-shadow: rgba(0, 0, 0, 0.45);
+    --color-card-shadow: rgba(0, 0, 0, 0.3);
+    --color-accent: #8b7cf0;
+    --color-accent-hover: #9d90f4;
+    --color-accent-text: #14141a;
+    --color-accent-soft: #2c2850;
+    --color-accent-soft-text: #c8c0fa;
     --color-danger: #f97066;
     --color-danger-bg: #3a1a17;
-    --color-user-bubble: #2a2a2f;
-    --color-code-bg: #26262a;
-    --color-canvas: #141416;
-    --color-canvas-dots: #2e2e33;
-    --color-node-bg: #1c1c1f;
-    --color-node-border: #3f3f46;
-    --color-edge-prerequisite: #a1a1aa;
-    --color-edge-part-of: #52525b;
-    --color-edge-related: #71717a;
+    --color-warn: #f5b25c;
+    --color-warn-bg: #3a2a12;
+    --color-user-bubble: #2a2a33;
+    --color-code-bg: #26262e;
+    --color-canvas: #151519;
+    --color-connector: #474756;
+    --color-card-selected: #8b7cf0;
+    --color-origin-ring: #4d4590;
+    --color-fresh: rgba(139, 124, 240, 0.4);
+    --color-suggestion: #8e8e9e;
+    --color-suggestion-border: #3a3a46;
   }
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --color-bg: #141416;
-  --color-surface: #1c1c1f;
-  --color-surface-2: #26262a;
-  --color-surface-hover: #2e2e33;
-  --color-text: #ececee;
-  --color-text-muted: #9a9aa3;
-  --color-text-inverse: #18181b;
-  --color-border: #303035;
-  --color-border-strong: #52525b;
-  --color-focus: #a1a1aa;
-  --color-overlay-shadow: rgba(0, 0, 0, 0.5);
-  --color-accent: #d4d4d8;
-  --color-accent-text: #18181b;
-  --color-origin: #a1a1aa;
-  --color-current: #e4e4e7;
-  --color-new: #71717a;
+  --color-bg: #151519;
+  --color-surface: #1e1e24;
+  --color-surface-2: #26262e;
+  --color-surface-hover: #2e2e38;
+  --color-text: #ececf1;
+  --color-text-muted: #a0a0ae;
+  --color-text-faint: #6e6e7c;
+  --color-border: #30303a;
+  --color-border-strong: #4a4a58;
+  --color-focus: #a597f5;
+  --color-overlay-shadow: rgba(0, 0, 0, 0.45);
+  --color-card-shadow: rgba(0, 0, 0, 0.3);
+  --color-accent: #8b7cf0;
+  --color-accent-hover: #9d90f4;
+  --color-accent-text: #14141a;
+  --color-accent-soft: #2c2850;
+  --color-accent-soft-text: #c8c0fa;
   --color-danger: #f97066;
   --color-danger-bg: #3a1a17;
-  --color-user-bubble: #2a2a2f;
-  --color-code-bg: #26262a;
-  --color-canvas: #141416;
-  --color-canvas-dots: #2e2e33;
-  --color-node-bg: #1c1c1f;
-  --color-node-border: #3f3f46;
-  --color-edge-prerequisite: #a1a1aa;
-  --color-edge-part-of: #52525b;
-  --color-edge-related: #71717a;
+  --color-warn: #f5b25c;
+  --color-warn-bg: #3a2a12;
+  --color-user-bubble: #2a2a33;
+  --color-code-bg: #26262e;
+  --color-canvas: #151519;
+  --color-connector: #474756;
+  --color-card-selected: #8b7cf0;
+  --color-origin-ring: #4d4590;
+  --color-fresh: rgba(139, 124, 240, 0.4);
+  --color-suggestion: #8e8e9e;
+  --color-suggestion-border: #3a3a46;
 }

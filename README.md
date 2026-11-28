@@ -7,16 +7,15 @@ good AI assistant, and a map of what you explored and were taught grows
 alongside the chat: a branching canvas of conversations, with the
 evidence-backed concepts each one taught.
 
-> **Status:** M3 (the branch-canvas backend) is in review. The M2 web UI
-> still talks to the retired concept-chat endpoints, so it does not work
-> against this backend; M4 replaces it with the canvas UI. See
+> **Status:** M4a (the first half of the canvas UI: cards, chat and
+> streaming) is in review; M4b (editing, keys, collapse, zoom levels,
+> concept links, panels, search) follows. See
 > [Implemented vs in progress](#implemented-vs-in-progress).
 
-![Chat screen with the live mini graph](docs/screenshots/m2/chat-screen.png)
+![The canvas: an origin chat with branches on both sides](docs/screenshots/m4a/light-canvas.png)
 
-More in [docs/screenshots/m2/](docs/screenshots/m2/): the graph screen at
-each zoom level and the floating chat window, from a short live Gemini
-session.
+More in [docs/screenshots/m4a/](docs/screenshots/m4a/): both themes, the
+conversation panel and the start page, from a short live Gemini session.
 
 ## Design
 
@@ -64,7 +63,41 @@ session.
 
 ## Implemented vs in progress
 
-M3, branch canvas (backend, in review):
+M4a, canvas UI part 1 (`frontend/`, in review):
+
+- A slim left rail (maps, new map, theme) and one canvas per map. The map
+  name can be renamed in place and is the browser tab title.
+- One layout: the root's children are split, the first half down the right
+  side and the rest back up the left, so the canvas reads clockwise. Each
+  side is a tidy tree laid out from the cards' measured sizes. When the tree
+  grows, nodes slide to their new places and the selected node stays where
+  it is on screen; a new branch is panned into view if it lands off screen.
+- Plain background (no grid or dots), curved connectors, React Flow
+  controls, zoom out to 15%.
+- Chat cards: the cartographer's title, the prompt, and the conversation in
+  an area of about nine lines that scrolls (wide tables scroll sideways), a
+  follow-up input, and "↳ Branch" to ask in a new child node instead.
+  "Open" shows the full conversation in a side panel. The origin has an
+  accent ring; new nodes briefly highlight.
+- Concept chips: every concept taught in the node. Concepts first taught
+  there are filled; concepts taught again there (with a verified quote) are
+  outlined with ↩ and jump to their home node.
+- Suggestions as faint chips under a chat node; clicking one creates the
+  child and streams its answer.
+- Streaming with a Stop button (and Ctrl+Esc). Node states: "Not answered
+  yet" with an Answer button, and, when the cartographer failed on a node,
+  a marker with Retry (`/extract`). Errors: 429 "Rate limited, try again in
+  N s", 503 "The model is busy, try again in a moment", 502 the model's
+  failure.
+- After each reply the UI polls `/canvas/status` until the cartographer is
+  idle, refreshing the canvas as `graph_version` changes.
+- "Context used" toggle on replies received in the current session.
+- Canvas shortcuts fire only when no text field is focused: Shift+1 zoom to
+  fit, Ctrl+Esc stop, Esc deselect.
+- Light and dark themes; every value is a variable in
+  `frontend/src/theme.css` (indigo accent, provisional until a design pass).
+
+M3, branch canvas (backend, merged):
 
 - `canvas_nodes` tree (one parent, one root per subject, no move operation,
   so no cycles), `suggestions`, `messages.canvas_node_id` and `stopped`,
@@ -76,6 +109,12 @@ M3, branch canvas (backend, in review):
   note/chat switching before an answer, branch delete with confirmation,
   subject rename, suggestions, branch path, search, and streamed replies with
   stop (see [API](#api)). Every canvas change bumps `graph_version`.
+- Each canvas node lists every concept taught in it: concepts first taught
+  there (`home: true`) and concepts taught again there with a verified
+  evidence quote. `extract_pending` marks replies the cartographer has not
+  processed yet.
+- A Gemini 503 (model overloaded) is handled like a 429: HTTP 503 with
+  `Retry-After`, or `status: 503` in a streamed `error` event.
 - Deleting a branch deletes concepts left with no evidence and rehomes
   concepts that still have evidence elsewhere.
 - Tutor replies stream as server-sent events; a stopped reply keeps what was
@@ -105,11 +144,13 @@ Implemented earlier:
 - Traversal helpers: `ancestors` and `descendants` by kind, `part_of_root`,
   and the shortest `path` between two nodes.
 - Trail with `from_node_id`; distance from the origin.
-- 310 backend offline tests; opt-in live Gemini tests. 24 frontend unit
-  tests (Vitest).
+- 314 backend offline tests; opt-in live Gemini tests. 19 frontend unit
+  tests (Vitest: API client and SSE parsing, canvas layout, visitor token).
 
-M2, UI (`frontend/`, merged; superseded by M4): React + TypeScript + Vite,
-React Flow. It used the concept-chat endpoints that M3 removed.
+M2, UI (merged; replaced by M4): React + TypeScript + Vite, React Flow. It
+used the concept-chat endpoints that M3 removed; its build setup, CI, API
+client pattern, Markdown and composer were kept, and its screens were
+removed in M4a. What it had:
 
 - Subject list and a "start a subject" form.
 - Chat screen: markdown replies (tables, code), Enter to send and
@@ -186,7 +227,7 @@ optionally with a system Chromium):
 
 ```bash
 cd frontend && CHROMIUM_PATH=/usr/bin/chromium node scripts/screenshots.mjs \
-  --subject 1 --visitor <token> --out screenshots --chat <node> --window <node>
+  --subject 1 --visitor <token> --out screenshots --theme dark --select <node> --open <node>
 ```
 
 The opt-in live test makes one real chat call and one structured call:
@@ -203,7 +244,8 @@ POST   /api/subjects                          {title, goal?, first_question?} ->
                                               (with root_canvas_node_id)
 PATCH  /api/subjects/{id}                     {title}: rename
 
-GET    /api/subjects/{id}/canvas              nodes (with messages and concept chips),
+GET    /api/subjects/{id}/canvas              nodes (with messages, concepts taught there
+                                              with a home flag, extract_pending),
                                               links mapped to node pairs, open
                                               suggestions, graph_version, cartographer
 GET    /api/subjects/{id}/canvas/status       {graph_version, cartographer, error} (poll this)
@@ -249,7 +291,7 @@ event: error   data: {status, message, retry_after?, message_id}   (failure mid-
 
 The question is saved before the model is called. A failure before the
 first piece is a plain HTTP error (429 with `Retry-After` for rate limits,
-502 otherwise) and leaves the question waiting, so the client can retry with
+503 with `Retry-After` when the model is busy, 502 otherwise) and leaves the question waiting, so the client can retry with
 no message or edit it. A stop (or a dropped connection, or a failure
 mid-reply) saves what was written as a reply with `stopped: true`. The
 cartographer starts after the stream has finished; poll `/canvas/status`
@@ -280,21 +322,28 @@ backend/
   tests/
 frontend/
   src/
-    api/             typed client (visitor header, 429 + Retry-After)
-    graph/           layout, semantic zoom, React Flow canvas
-    chat/            thread, composer, markdown, node detail
-    screens/         home, chat screen, graph screen
-    shell/           app shell, chat window, breadcrumb
-    state/           per-subject state: graph, polling, positions
-    theme.css        all design tokens (placeholder, neutral)
+    api/             typed client (visitor header, 429/503 + Retry-After), SSE parser
+    canvas/          layout, React Flow canvas, cards, concept chips, side panel
+    chat/            composer, markdown, messages, context used
+    screens/         start page, map screen
+    shell/           app shell with the left rail
+    state/           streamed replies, stop, cartographer polling
+    theme.css        all design tokens (provisional palette)
 docs/eval/         small pilot results (not benchmarks)
 ```
 
 ## Current limits
 
-- The UI has no visual design yet (neutral placeholder theme).
-- At the furthest zoom-out, node labels are too small to read (about 5 px):
-  the 48 px minimum limits the node box, not its text.
+- The palette is provisional; a design pass comes later.
+- Until M4b: no creating notes or siblings, editing, deleting, keyboard
+  navigation, context menu, collapse, zoom text levels, concept links on the
+  canvas, node detail panel, branch document or search in the UI.
+- With an odd number of root branches the middle one switches sides when
+  another root branch is added (first half right, rest left).
+- "Context used" is only shown for replies received in the current page
+  session.
+- A reply cut off by an error stays as a stopped partial answer; ask a
+  follow-up to continue.
 - Duplicate detection is by normalised name only; near-synonyms can become
   separate nodes.
 - The evidence check proves a quote is in the chat, not that the concept was
@@ -312,7 +361,6 @@ docs/eval/         small pilot results (not benchmarks)
   running several server processes against one database is not supported.
 - A stop takes effect at the next piece the model sends, not instantly.
 - A note's keyword is simply its title's first word (no model call).
-- The M2 UI does not work against the M3 backend; M4 replaces it.
 
 ## Pilot results
 

@@ -16,6 +16,7 @@ from conftest import (
     new_subject,
     sibling,
 )
+from doctus.llm import RateLimited
 from doctus.store import SCHEMA, Conflict, NotFound, Store, clean_keyword, note_title
 
 # ---------- store: tree integrity ----------
@@ -290,6 +291,65 @@ def test_node_detail_lists_evidence_links_and_reinforced_concepts(canvas):
     child_detail = client.get(f"/api/canvas-nodes/{a['id']}", headers=V1).json()
     assert child_detail["concepts"] == []
     assert [c["name"] for c in child_detail["also_taught_here"]] == ["Dative"]
+
+
+def test_canvas_lists_every_concept_taught_in_each_node_with_home_marked(canvas):
+    client, llm, _ = canvas
+    s, root = new_subject(client)
+    llm.queue_chat("The dative marks the indirect object. Cases mark roles.")
+    llm.queue_json(
+        extraction(
+            concepts=[
+                concept("Dative", "dative marks the indirect"),
+                concept("Cases", "Cases mark roles"),
+            ]
+        )
+    )
+    chat(client, root, "dative?")
+    a = child(client, root, "more dative").json()
+    # Re-taught with a verified quote (counts), and a name without a quote (dropped).
+    llm.queue_chat("Again: the dative answers wem.")
+    llm.queue_json(
+        extraction(
+            concepts=[
+                concept("dative ", "the dative answers wem"),
+                concept("Cases", "not in the reply"),
+            ]
+        )
+    )
+    chat(client, a["id"])
+    b = child(client, root, "unanswered").json()
+
+    view = canvas_of(client, s["id"])
+    by_id = {n["id"]: n for n in view["nodes"]}
+    assert [(c["name"], c["home"]) for c in by_id[root]["concepts"]] == [
+        ("Dative", True),
+        ("Cases", True),
+    ]
+    assert [
+        (c["name"], c["home"], c["home_canvas_node_id"]) for c in by_id[a["id"]]["concepts"]
+    ] == [("Dative", False, root)]
+    assert by_id[b["id"]]["concepts"] == []
+
+    detail = client.get(f"/api/canvas-nodes/{a['id']}", headers=V1).json()
+    assert [(c["name"], c["home"]) for c in detail["node"]["concepts"]] == [("Dative", False)]
+    assert [c["home"] for c in detail["also_taught_here"]] == [False]
+    root_detail = client.get(f"/api/canvas-nodes/{root}", headers=V1).json()
+    assert all(c["home"] for c in root_detail["concepts"])
+    assert [c["name"] for c in root_detail["node"]["concepts"]] == ["Dative", "Cases"]
+
+
+def test_extract_pending_marks_replies_the_cartographer_has_not_processed(canvas):
+    client, llm, _ = canvas
+    s, root = new_subject(client)
+    llm.queue_json(RateLimited("Gemini rate limit reached; try again shortly."))
+    chat(client, root, "hi")
+    view = canvas_of(client, s["id"])
+    assert view["cartographer"] == "error" and view["nodes"][0]["extract_pending"]
+    llm.queue_json(extraction(title="Greetings"))
+    assert client.post(f"/api/canvas-nodes/{root}/extract", headers=V1).status_code == 200
+    view = canvas_of(client, s["id"])
+    assert view["cartographer"] == "idle" and not view["nodes"][0]["extract_pending"]
 
 
 # ---------- API: creating, editing, deleting ----------

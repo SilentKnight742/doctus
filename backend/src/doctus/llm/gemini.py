@@ -7,12 +7,13 @@ from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel
 
-from .base import LLM, LLMError, RateLimited, Turn
+from .base import LLM, LLMError, ModelBusy, RateLimited, Turn
 
 DEFAULT_RETRY_AFTER = 60
+BUSY_RETRY_AFTER = 20
 
 
-def retry_after_seconds(exc) -> int:
+def retry_after_seconds(exc, default: int = DEFAULT_RETRY_AFTER) -> int:
     """Seconds to wait, from the error's RetryInfo ("retryDelay": "37s"), else a
     Retry-After header, else a default. Always at least 1."""
     details = getattr(exc, "details", None)
@@ -28,7 +29,7 @@ def retry_after_seconds(exc) -> int:
     try:
         return max(1, int(headers.get("retry-after", "")))
     except (TypeError, ValueError):
-        return DEFAULT_RETRY_AFTER
+        return default
 
 
 class GeminiLLM(LLM):
@@ -105,5 +106,10 @@ def _mapped(exc) -> LLMError:
         return RateLimited(
             "Gemini rate limit reached; try again shortly.",
             retry_after=retry_after_seconds(exc),
+        )
+    if code == 503:
+        return ModelBusy(
+            "Gemini is busy (model overloaded); try again in a moment.",
+            retry_after=retry_after_seconds(exc, BUSY_RETRY_AFTER),
         )
     return LLMError(f"Gemini API error ({code or '?'}): {exc}")

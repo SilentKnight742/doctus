@@ -4,7 +4,7 @@ cartographer running only after the stream has finished."""
 import time
 
 from conftest import V1, V2, calls, canvas_of, chat, events, make_client, new_subject, reply_text
-from doctus.llm import FakeStream, LLMError, RateLimited
+from doctus.llm import FakeStream, LLMError, ModelBusy, RateLimited
 
 
 def test_reply_streams_in_pieces_then_done(canvas):
@@ -147,6 +147,9 @@ def test_failure_mid_reply_keeps_the_partial_reply(canvas):
     assert (data["status"], data["retry_after"]) == (429, 9)
     saved = store.message_by_id(data["message_id"])
     assert (saved.content, saved.stopped) == ("Half an ", True)
+    llm.queue_chat(FakeStream(["Busy ", ModelBusy("busy", retry_after=6)]))
+    name, data = events(chat(client, root, "busy?").text)[-1]
+    assert (name, data["status"], data["retry_after"]) == ("error", 503, 6)
     llm.queue_chat(FakeStream(["x ", LLMError("boom")]))
     name, data = events(chat(client, root, "again").text)[-1]
     assert (name, data["status"]) == ("error", 502) and "retry_after" not in data
