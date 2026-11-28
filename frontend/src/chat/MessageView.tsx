@@ -1,31 +1,43 @@
-import { useState } from 'react'
-import type { ContextUsed as Ctx, Message } from '../api/types'
-import { ContextUsed } from './ContextUsed'
+import type { ChatMessage, MessagePart } from '../api/types'
 import { Markdown } from './Markdown'
 
-export function MessageView({ message, context }: { message: Message; context?: Ctx }) {
-  const [showCtx, setShowCtx] = useState(false)
+/** Tool names as the user reads them: the API says "world", the UI says "node". */
+const shownTool = (name: string) => name.replace(/world/g, 'node')
+
+export function Parts({ parts }: { parts: MessagePart[] }) {
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.type === 'text' ? (
+          <Markdown key={i} text={p.text} />
+        ) : (
+          <div key={i} className="tool-line" data-ok={p.ok}>
+            <span className="tool-mark" aria-hidden>
+              {p.ok ? '✓' : '!'}
+            </span>
+            <span className="tool-name">{shownTool(p.tool)}</span>
+            <span className="tool-summary">{p.summary}</span>
+          </div>
+        ),
+      )}
+    </>
+  )
+}
+
+export function MessageView({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
+    const text = message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')
     return (
       <div className="msg msg-user">
-        <div className="bubble">{message.content}</div>
+        {message.from_space_agent && <span className="msg-from small muted">From the space agent</span>}
+        <div className="bubble">{text}</div>
       </div>
     )
   }
   return (
     <div className="msg msg-assistant">
-      <Markdown text={message.content} />
-      {(message.stopped || context) && (
-        <div className="msg-tools">
-          {message.stopped && <span className="muted">Stopped</span>}
-          {context && (
-            <button type="button" className="link-button" onClick={() => setShowCtx((v) => !v)}>
-              {showCtx ? 'Hide context used' : 'Context used'}
-            </button>
-          )}
-          {showCtx && context && <ContextUsed ctx={context} />}
-        </div>
-      )}
+      <Parts parts={message.parts} />
+      {message.stopped && <span className="muted small">Stopped</span>}
     </div>
   )
 }

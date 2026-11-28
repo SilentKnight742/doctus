@@ -1,43 +1,39 @@
-import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet } from 'react-router'
-import { api } from '../api/client'
-import { applyTheme, loadTheme, type ThemeChoice } from '../lib/theme'
+import { Link, Outlet } from 'react-router'
 
-const NEXT: Record<ThemeChoice, ThemeChoice> = { system: 'light', light: 'dark', dark: 'system' }
-const LABEL: Record<ThemeChoice, string> = { system: 'Theme: system', light: 'Theme: light', dark: 'Theme: dark' }
-
-/** The slim left rail (maps, new map, theme) and the main area. */
+/** The whole window is the current screen; no side rail. */
 export function AppShell() {
-  const subjects = useQuery({ queryKey: ['subjects'], queryFn: api.listSubjects })
-  const [theme, setTheme] = useState<ThemeChoice>(loadTheme)
-  useEffect(() => applyTheme(theme), [theme])
-
   return (
-    <div className="shell">
-      <nav className="rail" aria-label="Maps">
-        <Link to="/" className="brand">
-          Doctus
-        </Link>
-        <Link to="/" className="button rail-new">
-          + New map
-        </Link>
-        <ul className="rail-list">
-          {(subjects.data ?? []).map((s) => (
-            <li key={s.id}>
-              <NavLink to={`/s/${s.id}`} className="rail-item" title={s.title}>
-                {s.title}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-        <button type="button" className="link-button rail-theme" onClick={() => setTheme(NEXT[theme])}>
-          {LABEL[theme]}
-        </button>
-      </nav>
-      <main className="main">
-        <Outlet />
-      </main>
-    </div>
+    <main className="main">
+      <Outlet />
+    </main>
+  )
+}
+
+export function DemoBadge() {
+  return (
+    <span className="demo-badge" title="Data lives in this browser; agents are scripted demos, not a model.">
+      Prototype · demo
+    </span>
+  )
+}
+
+/** The left end of a screen's top bar: back to the spaces list, and (inside a node) to its space. */
+export function Crumbs({ space }: { space?: { id: number; title: string } }) {
+  return (
+    <nav className="crumbs" aria-label="Breadcrumbs">
+      <Link to="/" className="back-link">
+        ← Spaces
+      </Link>
+      {space && (
+        <>
+          <span className="crumb-sep" aria-hidden>
+            /
+          </span>
+          <Link to={`/s/${space.id}`} className="back-link">
+            {space.title}
+          </Link>
+        </>
+      )}
+    </nav>
   )
 }
