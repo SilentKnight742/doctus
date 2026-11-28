@@ -1,12 +1,15 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api, describeError } from '../api/client'
+import { DemoBadge } from '../shell/AppShell'
 
 export function Home() {
+  const qc = useQueryClient()
   const navigate = useNavigate()
   const spaces = useQuery({ queryKey: ['spaces'], queryFn: api.listSpaces })
   const [title, setTitle] = useState('')
+  const [confirmReset, setConfirmReset] = useState(false)
   const create = useMutation({
     mutationFn: () => api.createSpace(title.trim() || 'Untitled space'),
     onSuccess: (s) => navigate(`/s/${s.id}`),
@@ -15,10 +18,14 @@ export function Home() {
   return (
     <div className="home">
       <div className="home-card">
+        <div className="home-head">
+          <span className="brand">Doctus</span>
+          <DemoBadge />
+        </div>
         <h1 className="home-title">Spaces</h1>
         <p className="muted">
-          A space is one canvas of <strong>worlds</strong>. Each world holds widgets (endpoints, notes, screenshots,
-          tables, decisions) and its own AI chat. Worlds connect through <strong>reasons</strong>: one widget here relates
+          A space is one canvas of <strong>nodes</strong>. Each node holds widgets (endpoints, notes, screenshots,
+          tables, decisions) and its own AI chat. Nodes connect through <strong>reasons</strong>: one widget here relates
           to one widget there, and why.
         </p>
         <ul className="space-list">
@@ -44,9 +51,34 @@ export function Home() {
           </button>
         </form>
         {create.error && <p className="form-error">{describeError(create.error)}</p>}
-        <p className="muted small home-note">
-          Prototype: everything is stored in this browser, and the agents are scripted demos, not a model.
-        </p>
+        <div className="home-note">
+          <p className="muted small">
+            Prototype: everything is stored in this browser, and the agents are scripted demos, not a model.
+          </p>
+          {confirmReset ? (
+            <div className="inline-confirm reset-confirm">
+              <span className="small">Drop your changes and reload the demo data?</span>
+              <button
+                type="button"
+                className="link-button small danger"
+                onClick={async () => {
+                  setConfirmReset(false)
+                  await api.resetDemo()
+                  await qc.resetQueries()
+                }}
+              >
+                Reset
+              </button>
+              <button type="button" className="link-button small" onClick={() => setConfirmReset(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="link-button small" onClick={() => setConfirmReset(true)}>
+              Reset demo
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

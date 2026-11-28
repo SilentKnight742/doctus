@@ -1,6 +1,6 @@
 # Doctus
 
-A visual workspace where an AI helps you build **worlds** and the
+A visual workspace where an AI helps you build **nodes** and the
 **connections** between them, on one canvas. The v1 flagship is product
 managers: understanding or improving a product through its endpoints, designs,
 flows and decisions.
@@ -11,42 +11,52 @@ flows and decisions.
 > redirected on 2026-11-28; the v1 learning product (tutor, cartographer,
 > concepts) is in git history and its backend is removed in N1.
 
-![Demo: the space agent builds a Petstore space, reasons become a new world, a world agent edits an endpoint](docs/demo/p0-demo.gif)
+![Demo: the space agent builds a Petstore space, reasons become a new node, a node agent edits an endpoint](docs/demo/p0-demo.gif)
 
 The same flow as video: [docs/demo/p0-demo.webm](docs/demo/p0-demo.webm)
-(25 s, 2× speed). Screenshots in both themes:
-[docs/screenshots/p0/](docs/screenshots/p0/).
+(2× speed). Screenshots: [docs/screenshots/p0/](docs/screenshots/p0/).
 
 ## The idea
 
-- **Space**: one canvas of worlds.
-- **World**: an object on the space canvas. Inside it is its own canvas of
+- **Space**: one canvas of nodes.
+- **Node**: an object on the space canvas. Inside it is its own canvas of
   widgets, plus its own AI chat.
-- **Widget**: a typed item in a world (note, image, link, table, checklist,
+- **Widget**: a typed item in a node (note, image, link, table, checklist,
   OpenAPI endpoint, …), freely placed and resized.
-- **Reason**: one way two worlds relate: a widget in world A ↔ a widget in
-  world B, with a kind, a one-line explanation and an author (AI or user).
-- **Connection**: derived, never drawn. Two worlds are connected iff at least
+- **Reason**: one way two nodes relate: a widget in node A ↔ a widget in
+  node B, with a kind, a one-line explanation and an author (AI or user).
+- **Connection**: derived, never drawn. Two nodes are connected iff at least
   one reason links them; the space canvas draws one line per pair, thicker
   with more reasons.
 
+The UI says "node"; the code and the API still say `world` (`World`,
+`world_id`, `create_world`, `/s/:space/w/:world`) until a later rename.
+
 ## What the prototype shows
 
-![The space canvas](docs/screenshots/p0/light-space.png)
+![The space canvas after Arrange, with a node's summary on hover](docs/screenshots/p0/space-arranged.png)
 
-- **Space canvas** (React Flow): worlds as cards (title, summary, widget
-  count, widget types); drag to arrange, positions saved. One line per pair
-  of worlds, its width and label from the reason count.
-- **Connection view**: click a line for a table of its reasons (kind, text,
-  AI/User, both widgets with jump links). Edit, delete, or add a reason.
-  Select reasons **across several connections**; the tray then offers
-  **New world from selection**, which copies (default) or moves the
+- **No side panels.** The home screen lists the spaces; each screen's top
+  bar starts with **← Spaces** (and, inside a node, the space it belongs
+  to). Chats and space-level widgets are **floating windows**: drag one by
+  its title bar, minimise it to a small bar (▾/▴ or double-click the bar).
+  Each window remembers its position and state in this browser.
+- **Space canvas** (React Flow): nodes are compact, just a colour and a
+  title; the summary shows on hover. Click a node to open it; drag to move
+  it (positions saved). One line per pair of nodes, its width and label from
+  the reason count. **Arrange** tidies the node positions so fewer lines
+  cross (a small search over a staggered grid: crossings first, then line
+  length, then lines running through other nodes; same space, same result).
+- **Connection view**: click a line for a floating table of its reasons
+  (kind, text, AI/User, both widgets with jump links). Edit, delete, or add
+  a reason. Select reasons **across several connections**; the tray then
+  offers **New node from selection**, which copies (default) or moves the
   referenced widgets. Copies keep `copied_from` and show where they came
   from; moved widgets keep all their reasons.
-- **Inside a world**: a canvas of widgets. Drag by the header, resize when
+- **Inside a node**: a canvas of widgets. Drag by the header, resize when
   selected, double-click (or ✎) to edit in place, × to delete (with its
   reasons). Each widget shows its reasons (⇄ n) with jumps to the widget in
-  the other world, which is centred and flashed.
+  the other node, which is centred and flashed.
 - **Widgets are data-defined.** A widget type is a schema of primitive
   fields (`text`, `number`, `date`, `bool`, `enum`, `url`, `file`, `ref`,
   `code`, `list`, `table`) plus a view template (`card`, `table`, `list`,
@@ -55,30 +65,33 @@ The same flow as video: [docs/demo/p0-demo.webm](docs/demo/p0-demo.webm)
   schema on every write, and errors show in the editor.
 - **A type that is not built in**: the space agent defines a **Decision**
   type for the Petstore space (question, status, owner, due date, options
-  table, outcome) and the Open decisions world uses it, through exactly the
+  table, outcome) and the Open decisions node uses it, through exactly the
   same system as the built-ins.
-- **Space-level widgets**: the Space widgets tab holds **Launch readiness**,
-  a tracker (another space-defined type: items with a world reference, owner,
-  status and due date, with a progress bar).
-- **Space chat and world chat** with scripted agents. Suggested prompts are
-  shown as chips; the reply streams, and every tool call shows as a line
-  (✓ or a rejection). The canvas updates as the agent works, and Stop keeps
-  what was done so far. The space agent can instruct a world agent; that
-  exchange appears in the world's chat.
+- **Space-level widgets**: the Space widgets window (top right, minimised at
+  first) holds **Launch readiness**, a tracker (another space-defined type:
+  items with a node reference, owner, status and due date, with a progress
+  bar).
+- **Space chat and node chat** (floating, docked bottom-left) with scripted
+  agents. Suggested prompts are shown as chips; the reply streams, and every
+  tool call shows as a line (✓ or a rejection). The canvas updates as the
+  agent works, and Stop keeps what was done so far. A minimised chat keeps
+  streaming. The space agent can instruct a node agent; that exchange
+  appears in the node's chat.
   - Empty space: "I'm a PM improving the Swagger Petstore API" builds six
-    worlds, 22 widgets, the Decision and Tracker types, 13 reasons and
+    nodes, 22 widgets, the Decision and Tracker types, 13 reasons and
     the tracker.
   - Space: find more links between Checkout and Store; update launch
-    readiness from the worlds.
+    readiness from the nodes.
   - Pets endpoints: add the 404 response to `GET /pet/{petId}`.
   - Open decisions: turn the open questions into a checklist.
-  - Any world: tidy into a grid.
+  - Any node: tidy into a grid.
   - Anything else gets a short "this is a scripted prototype" reply.
 
-Inside a world, and the space-defined Decision type:
+Inside a node, the space-defined Decision type, and the tracker window:
 
-![Inside the Pets endpoints world](docs/screenshots/p0/light-world.png)
-![Decisions (a space-defined type)](docs/screenshots/p0/dark-decisions.png)
+![Inside the Pets endpoints node](docs/screenshots/p0/node.png)
+![Decisions (a space-defined type)](docs/screenshots/p0/decisions.png)
+![Launch readiness, a space-level tracker in a floating window](docs/screenshots/p0/tracker.png)
 
 ## How the prototype works
 
@@ -86,20 +99,22 @@ Inside a world, and the space-defined Decision type:
   screen uses. In P0 it is backed by `frontend/src/mock/`; N1 adds an HTTP
   implementation of the same interface.
 - `mock/db.ts` holds the data and every rule: schema validation, the evidence
-  rule (a reason needs two existing widgets in worlds of one space), cascades
-  (widget → its reasons; world → its widgets), connection derivation, copy vs
+  rule (a reason needs two existing widgets in nodes of one space), cascades
+  (widget → its reasons; node → its widgets), connection derivation, copy vs
   move. Pure TypeScript with unit tests, as a spec for N1.
 - `mock/agents/` holds the tools the N2 agents will have
   (`create_world`, `create_widget`, `update_widget`, `add_reason`,
   `define_type`, `arrange_widgets`, …) and the scripted runner. Tool calls go
-  through the same validation as the UI; a world agent may only touch its own
-  world. The seed is the headline script played instantly, so the seeded
+  through the same validation as the UI; a node agent may only touch its own
+  node. The seed is the headline script played instantly, so the seeded
   space and the live demo match.
 - Data is kept in `localStorage` under a schema version
   (`doctus.proto.version`). When the version changes, the saved data is
   dropped and the seed is loaded again. Every storage access is guarded;
-  without storage the data lives in memory. **Reset demo** (left rail)
-  reloads the seed.
+  without storage the data lives in memory. **Reset demo** (on the home
+  screen) reloads the seed.
+- Light theme only for now; every colour is a variable in
+  `frontend/src/theme.css`.
 
 Endpoint data follows the public Swagger Petstore (OpenAPI 3) sample. Team
 names, tickets, numbers and the checkout wireframe are invented for the demo.
@@ -126,7 +141,7 @@ with a system Chromium; the dev server must be running):
 
 ```bash
 cd frontend
-CHROMIUM_PATH=/usr/bin/chromium node scripts/screenshots.mjs --out ../docs/screenshots/p0 --theme light
+CHROMIUM_PATH=/usr/bin/chromium node scripts/screenshots.mjs --out ../docs/screenshots/p0
 CHROMIUM_PATH=/usr/bin/chromium node scripts/record-demo.mjs --out ../docs/demo
 python3 scripts/frames-to-gif.py ../docs/demo/frames ../docs/demo/p0-demo.gif \
   --video ../docs/demo/p0-demo.webm --ffmpeg ~/.cache/ms-playwright/ffmpeg-1011/ffmpeg-linux
@@ -146,18 +161,18 @@ frontend/src/
     agents/   agent tools, scripted runner, the Petstore scripts
   schema/     built-in widget types, the Decision and Tracker types, validation
   widgets/    renderers per view template, field display/editors per primitive
-  space/      space canvas, world cards, connection lines and view, new world dialog,
-              space widgets
-  world/      world canvas, widget nodes (drag, resize, edit, reasons)
+  space/      space canvas, node cards, connection lines and view, Arrange,
+              new node dialog, space widgets
+  world/      node canvas, widget cards (drag, resize, edit, reasons)
   chat/       chat panel, messages with tool lines, composer, markdown
-  shell/      left rail, side panel
-  theme.css   design tokens, light and dark
+  shell/      top-bar crumbs, floating windows
+  theme.css   design tokens (light)
 backend/      the v1 learning backend, removed in N1
 ```
 
 ## Next
 
-N1 data model and API (FastAPI + SQLite, the same shapes), N2 space and world
+N1 data model and API (FastAPI + SQLite, the same shapes), N2 space and node
 agents (Gemini by default; Anthropic and OpenAI; bring your own key), N3/N4
 connect these screens to the real API, N5 OpenAPI import, uploads and an MCP
 server. See `CLAUDE.md`.
@@ -170,7 +185,7 @@ server. See `CLAUDE.md`.
 - The generic `table` widget has up to five text columns, named by its
   `columns` list; user-defined column types come with user-defined widget
   types.
-- Widget references (`ref`) are shown and edited for worlds; widget-to-widget
+- Widget references (`ref`) are shown and edited for nodes; widget-to-widget
   references are supported by the schema but not used in the seed.
 - The palette is provisional; a design pass comes later.
 

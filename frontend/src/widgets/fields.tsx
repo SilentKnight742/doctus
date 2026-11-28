@@ -37,7 +37,7 @@ function RefLink({ value, ctx }: { value: RefValue; ctx: FieldCtx }) {
     const w = ctx.worlds.find((x) => x.id === value.id)
     return (
       <Link className="ref-chip nodrag" to={`/s/${ctx.spaceId}/w/${value.id}`}>
-        {w?.title ?? `World ${value.id}`}
+        {w?.title ?? `Node ${value.id}`}
       </Link>
     )
   }

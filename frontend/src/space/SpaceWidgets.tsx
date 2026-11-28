@@ -59,7 +59,7 @@ function SpaceWidget({ widget, type, ctx }: { widget: Widget; type: WidgetType; 
   )
 }
 
-/** Widgets that belong to the space itself (trackers), not to any world. */
+/** Widgets that belong to the space itself (trackers), not to any node. */
 export function SpaceWidgets({ view }: { view: SpaceView }) {
   const ctx: FieldCtx = { spaceId: view.space.id, worlds: view.worlds }
   const [adding, setAdding] = useState(false)
@@ -67,7 +67,7 @@ export function SpaceWidgets({ view }: { view: SpaceView }) {
   return (
     <div className="space-widgets">
       <p className="muted small">
-        Space-level widgets track work across worlds. They use the same widget types; the tracker below is a type defined
+        Space-level widgets track work across nodes. They use the same widget types; the tracker below is a type defined
         for this space, not built in.
       </p>
       {view.space_widgets.map((w) => {

@@ -15,7 +15,6 @@ const { values: a } = parseArgs({
   options: {
     base: { type: 'string', default: 'http://localhost:5173' },
     out: { type: 'string', default: 'demo' },
-    theme: { type: 'string', default: 'light' },
   },
 })
 const size = { width: 1280, height: 800 }
@@ -24,7 +23,7 @@ rmSync(frames, { recursive: true, force: true })
 mkdirSync(frames, { recursive: true })
 
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
-const ctx = await browser.newContext({ viewport: size, colorScheme: a.theme })
+const ctx = await browser.newContext({ viewport: size })
 const page = await ctx.newPage()
 const pause = (ms) => page.waitForTimeout(ms)
 
@@ -38,9 +37,9 @@ cdp.on('Page.screencastFrame', async ({ data, metadata, sessionId }) => {
 })
 await cdp.send('Page.startScreencast', { format: 'png', maxWidth: size.width, maxHeight: size.height })
 
-const world = (t) => page.locator('.rail-world', { hasText: t })
+const node = (t) => page.locator('.react-flow__node', { hasText: t })
 const edge = async (t1, t2) => {
-  const id = async (t) => Number((await world(t).getAttribute('href')).split('/').pop())
+  const id = async (t) => Number(await node(t).getAttribute('data-id'))
   const [x, y] = [await id(t1), await id(t2)].sort((p, q) => p - q)
   return page.locator(`.react-flow__edge[data-id="${x}-${y}"] .react-flow__edge-interaction`)
 }
@@ -55,6 +54,8 @@ await pause(1200)
 await page.click('.prompt-chip')
 await page.waitForSelector('.chat-running')
 await page.waitForSelector('.chat-running', { state: 'detached', timeout: 120000 })
+await pause(1500)
+await page.click('button:has-text("Arrange")')
 await pause(2000)
 
 // 2. Why do Checkout and Store connect? Select reasons across two connections.
@@ -70,8 +71,8 @@ await pause(1400)
 await page.locator('.reason-table tbody input[type=checkbox]').nth(0).check()
 await pause(1200)
 
-// 3. New world from selection (copy).
-await page.click('text=New world from selection…')
+// 3. New node from selection (copy).
+await page.click('text=New node from selection…')
 await pause(600)
 await page.locator('.dialog input[placeholder]').pressSequentially('Checkout data flow', { delay: 45 })
 await pause(900)
@@ -82,8 +83,13 @@ await page.click('.toast a')
 await page.waitForSelector('.widget-card')
 await pause(2200)
 
-// 4. Inside a world: the world agent edits an endpoint.
-await world('Pets endpoints').click()
+// 4. Inside a node: the node agent edits an endpoint.
+await page.locator('.crumbs a').nth(1).click()
+await page.waitForSelector('.node-card')
+await pause(900)
+await node('Pets endpoints').hover()
+await pause(1200)
+await node('Pets endpoints').locator('.node-card').click()
 await page.waitForSelector('.widget-card')
 await pause(1500)
 await page.click('.prompt-chip:has-text("404")')
@@ -92,10 +98,13 @@ await page.waitForSelector('.chat-running', { state: 'detached', timeout: 60000 
 await pause(2200)
 
 // 5. Back to the space: the launch-readiness tracker.
-await page.click('.back-link')
-await page.waitForSelector('.world-card')
-await page.click('role=tab[name=/Space widgets/]')
-await pause(2500)
+await page.locator('.crumbs a').nth(1).click()
+await page.waitForSelector('.node-card')
+await pause(800)
+await page.click('[aria-label="Minimise Space chat"]')
+await pause(600)
+await page.click('[aria-label^="Expand Space widgets"]')
+await pause(2800)
 
 await cdp.send('Page.stopScreencast')
 writeFileSync(join(frames, 'times.json'), JSON.stringify(times))

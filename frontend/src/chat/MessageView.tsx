@@ -1,6 +1,9 @@
 import type { ChatMessage, MessagePart } from '../api/types'
 import { Markdown } from './Markdown'
 
+/** Tool names as the user reads them: the API says "world", the UI says "node". */
+const shownTool = (name: string) => name.replace(/world/g, 'node')
+
 export function Parts({ parts }: { parts: MessagePart[] }) {
   return (
     <>
@@ -12,7 +15,7 @@ export function Parts({ parts }: { parts: MessagePart[] }) {
             <span className="tool-mark" aria-hidden>
               {p.ok ? '✓' : '!'}
             </span>
-            <span className="tool-name">{p.tool}</span>
+            <span className="tool-name">{shownTool(p.tool)}</span>
             <span className="tool-summary">{p.summary}</span>
           </div>
         ),

@@ -19,6 +19,8 @@ export interface MockOptions {
   clear?: () => void
 }
 
+const NOTIFY_MS = 30
+
 export function makeMockApi(opts: MockOptions = {}): DoctusApi {
   const latency = opts.latency ?? 60
   const pace = opts.pace ?? realPace
@@ -34,9 +36,16 @@ export function makeMockApi(opts: MockOptions = {}): DoctusApi {
     if (!saved) save(db.state)
   })()
 
+  // Save every change at once; tell the screens once per burst of writes
+  // (e.g. Arrange moving every node), so they refetch once.
+  let pending: ReturnType<typeof setTimeout> | null = null
   const changed = () => {
     save(db.state)
-    for (const l of listeners) l()
+    if (pending) return
+    pending = setTimeout(() => {
+      pending = null
+      for (const l of listeners) l()
+    }, NOTIFY_MS)
   }
   const wait = () => (latency ? new Promise((r) => setTimeout(r, latency)) : Promise.resolve())
 

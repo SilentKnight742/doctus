@@ -48,7 +48,7 @@ export function emptyState(): DbState {
   return { next_id: 1, spaces: [], worlds: [], widgets: [], reasons: [], types: [], messages: {} }
 }
 
-export const WORLD_SIZE = { w: 260, h: 150 }
+export const WORLD_SIZE = { w: 200, h: 44 }
 export const COLOURS = ['indigo', 'teal', 'amber', 'rose', 'sky', 'olive', 'slate']
 
 const notFound = (what: string, id: Id) => new ApiError(404, `${what} ${id} not found`)
@@ -104,7 +104,7 @@ export class Db {
 
   world(id: Id): World {
     const w = this.state.worlds.find((x) => x.id === id)
-    if (!w) throw notFound('World', id)
+    if (!w) throw notFound('Node', id)
     return w
   }
 
@@ -424,7 +424,7 @@ export class Db {
     const b = this.world(worldB)
     const key = pairKey(a.id, b.id)
     const connection = this.connections(a.space_id).find((c) => c.key === key)
-    if (!connection) throw new ApiError(404, 'These worlds are not connected')
+    if (!connection) throw new ApiError(404, 'These nodes are not connected')
     const inPair = (w: Id) => {
       const wid = this.state.widgets.find((x) => x.id === w)?.world_id
       return wid === a.id || wid === b.id

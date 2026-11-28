@@ -92,7 +92,7 @@ const decision = (
 const PETSTORE_STEPS: Step[] = [
   {
     say:
-      'Let’s map the Petstore API around what you’re improving. I’ll make one **world** per area ' +
+      'Let’s map the Petstore API around what you’re improving. I’ll make one **node** per area ' +
       '(pets, store, users), one for the checkout design, one for open decisions and one for metrics, ' +
       'then connect them with **reasons**.',
   },
@@ -362,7 +362,7 @@ const PETSTORE_STEPS: Step[] = [
       ),
     ],
   },
-  { say: 'Now the reasons that connect the worlds.' },
+  { say: 'Now the reasons that connect the nodes.' },
   reason(`${P}#GET /pet/{petId}`, `${D}#Sold pets: 404 or 410 from GET /pet/{petId}?`, 'decided by', 'What this returns for a sold pet waits on the 404 vs 410 decision.'),
   reason(`${P}#Pet status lifecycle`, `${S}#Order status ↔ pet status`, 'same data', 'Both describe the pet status changes an order causes.'),
   reason(`${P}#PUT /pet`, `${S}#Order status ↔ pet status`, 'contradicts', 'PUT /pet can set status=sold directly, skipping the order flow.'),
@@ -378,8 +378,8 @@ const PETSTORE_STEPS: Step[] = [
   reason(`${M}#Checkout funnel`, `${C}#Pet details step (wireframe)`, 'informs', 'The pet details step loses 36% of sessions.'),
   {
     say:
-      'Last, a space-level **tracker** so launch readiness is visible across worlds. ' +
-      'Open a connection line to see the reasons behind it, or a world to see its widgets.',
+      'Last, a space-level **tracker** so launch readiness is visible across nodes. ' +
+      'Open a connection line to see the reasons behind it, or a node to see its widgets.',
   },
   { call: { tool: 'define_type', args: { type: trackerType(0) } } },
   {
@@ -437,7 +437,7 @@ export const SCRIPTS: Script[] = [
     label: 'Find more links between Checkout and Store.',
     when: (db, scope) => !!worldNamed(db, scope, C) && !!worldNamed(db, scope, S),
     steps: [
-      { say: 'Reading both worlds for links that are not there yet…' },
+      { say: 'Reading both nodes for links that are not there yet…' },
       {
         dynamic: (db, scope) => {
           const c = worldNamed(db, scope, C)!
@@ -471,11 +471,11 @@ export const SCRIPTS: Script[] = [
   {
     id: 'update-tracker',
     scope: 'space',
-    label: 'Update launch readiness from the worlds.',
+    label: 'Update launch readiness from the nodes.',
     when: (db, scope) =>
       db.state.widgets.some((w) => w.space_id === scope.id && w.world_id == null && w.type === 'tracker'),
     steps: [
-      { say: 'Checking each tracker item against its world…' },
+      { say: 'Checking each tracker item against its node…' },
       {
         dynamic: (db, scope) => {
           const tracker = db.state.widgets.find((w) => w.space_id === scope.id && w.world_id == null && w.type === 'tracker')!
@@ -517,7 +517,7 @@ export const SCRIPTS: Script[] = [
       {
         dynamic: (db, scope) => {
           const w = findWidget(db, scope.id, 'openapi_endpoint', 'path', '/pet/{petId}')
-          if (!w) return [{ say: 'There is no GET /pet/{petId} widget in this world.' }]
+          if (!w) return [{ say: 'There is no GET /pet/{petId} widget in this node.' }]
           const rows = w.data.responses as Row[]
           if (rows.some((r) => r.status === '404'))
             return [{ say: 'GET /pet/{petId} already documents a 404.' }]
@@ -575,7 +575,7 @@ export const SCRIPTS: Script[] = [
   {
     id: 'arrange',
     scope: 'world',
-    label: 'Tidy this world into a grid.',
+    label: 'Tidy this node into a grid.',
     when: (db, scope) => db.state.widgets.filter((w) => w.world_id === scope.id).length > 1,
     steps: [{ call: { tool: 'arrange_widgets', args: { columns: 3 } } }, { say: 'Arranged.' }],
   },

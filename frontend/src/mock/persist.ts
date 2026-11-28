@@ -6,7 +6,7 @@
  */
 import type { DbState } from './db'
 
-export const SCHEMA_VERSION = 'p0-2'
+export const SCHEMA_VERSION = 'p0-3'
 export const DATA_KEY = 'doctus.proto.db'
 export const VERSION_KEY = 'doctus.proto.version'
 

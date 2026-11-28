@@ -37,7 +37,7 @@ export function trackerType(spaceId: number): WidgetType {
   return {
     name: 'tracker',
     label: 'Tracker',
-    description: 'Space-level progress across worlds: items, owners, status.',
+    description: 'Space-level progress across nodes: items, owners, status.',
     builtin: false,
     space_id: spaceId,
     view: 'table',
@@ -50,7 +50,7 @@ export function trackerType(spaceId: number): WidgetType {
         type: 'table',
         fields: [
           { key: 'item', label: 'Item', type: 'text' },
-          { key: 'world', label: 'World', type: 'ref', ref_kind: 'world' },
+          { key: 'world', label: 'Node', type: 'ref', ref_kind: 'world' },
           { key: 'owner', label: 'Owner', type: 'text' },
           { key: 'status', label: 'Status', type: 'enum', options: ['Not started', 'In progress', 'Blocked', 'Ready'] },
           { key: 'due', label: 'Due', type: 'date' },

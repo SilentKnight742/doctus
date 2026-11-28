@@ -53,7 +53,7 @@ export function runTool(db: Db, scope: ChatScope, call: ToolCall): ToolResult {
 }
 
 function inScopeWorld(db: Db, scope: ChatScope, worldId: Id) {
-  if (scope.kind === 'world' && worldId !== scope.id) throw new ApiError(422, 'world_id: a world agent works in its own world')
+  if (scope.kind === 'world' && worldId !== scope.id) throw new ApiError(422, 'world_id: a node agent works in its own node')
   if (scope.kind === 'space' && db.world(worldId).space_id !== scope.id) throw new ApiError(422, 'world_id: not in this space')
 }
 
@@ -68,7 +68,7 @@ function exec(db: Db, scope: ChatScope, { tool, args: a }: ToolCall): ToolResult
         x: a.x as number | undefined,
         y: a.y as number | undefined,
       })
-      return { ok: true, summary: `Created world “${w.title}”`, id: w.id }
+      return { ok: true, summary: `Created node “${w.title}”`, id: w.id }
     }
     case 'create_widget': {
       const worldId = scope.kind === 'world' && a.world_id === undefined ? scope.id : id(a.world_id, 'world_id')

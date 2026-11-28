@@ -48,7 +48,7 @@ export function NewWorldDialog({
           create.mutate()
         }}
       >
-        <h2 id="nw-title">New world from selection</h2>
+        <h2 id="nw-title">New node from selection</h2>
         <label className="field">
           <span>Title</span>
           <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sold-pet handling" />
@@ -64,7 +64,7 @@ export function NewWorldDialog({
           <label>
             <input type="radio" name="mode" checked={mode === 'move'} onChange={() => setMode('move')} />
             <span>
-              <strong>Move</strong> <span className="muted small">widgets leave their worlds, keeping their reasons</span>
+              <strong>Move</strong> <span className="muted small">widgets leave their nodes, keeping their reasons</span>
             </span>
           </label>
         </fieldset>
@@ -78,7 +78,7 @@ export function NewWorldDialog({
         {create.error && <p className="form-error">{describeError(create.error)}</p>}
         <div className="form-actions">
           <button type="submit" className="button primary" disabled={!title.trim() || create.isPending}>
-            Create world
+            Create node
           </button>
           <button type="button" className="button ghost" onClick={onCancel}>
             Cancel

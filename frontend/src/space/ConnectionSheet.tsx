@@ -129,11 +129,11 @@ function AddReason({ worldA, worldB }: { worldA: Id; worldB: Id }) {
         add.mutate()
       }}
     >
-      <select aria-label={`Widget in ${a.data?.world.title ?? 'first world'}`} value={wa} onChange={(e) => setWa(e.target.value)}>
+      <select aria-label={`Widget in ${a.data?.world.title ?? 'first node'}`} value={wa} onChange={(e) => setWa(e.target.value)}>
         <option value="">{a.data?.world.title ?? '…'}: widget</option>
         {options(a.data)}
       </select>
-      <select aria-label={`Widget in ${b.data?.world.title ?? 'second world'}`} value={wb} onChange={(e) => setWb(e.target.value)}>
+      <select aria-label={`Widget in ${b.data?.world.title ?? 'second node'}`} value={wb} onChange={(e) => setWb(e.target.value)}>
         <option value="">{b.data?.world.title ?? '…'}: widget</option>
         {options(b.data)}
       </select>

@@ -15,13 +15,16 @@ import { api, describeError } from '../api/client'
 import type { Id, WidgetType } from '../api/types'
 import { ChatPanel } from '../chat/ChatPanel'
 import { widgetTitle } from '../schema/validate'
-import { SidePanel } from '../shell/SidePanel'
+import { Crumbs, DemoBadge } from '../shell/AppShell'
+import { FloatingWindow } from '../shell/FloatingWindow'
 import type { FieldCtx } from '../widgets/fields'
 import { starterData } from '../widgets/starter'
 import { WidgetNode, type WidgetFlowNode } from './WidgetNode'
 
 const nodeTypes: NodeTypes = { widget: WidgetNode }
 const FRESH_MS = 4000
+// Fit the canvas to the space right of the chat window (docked bottom-left).
+const FIT = { maxZoom: 1, padding: { top: '56px', right: '56px', bottom: '56px', left: '420px' } } as const
 
 function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [editing, setEditing] = useState(false)
@@ -44,7 +47,7 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
     >
       <input
         className="title-input"
-        aria-label="World title"
+        aria-label="Node title"
         autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -144,7 +147,7 @@ function WorldCanvas({ spaceId, worldId }: { spaceId: Id; worldId: Id }) {
       }),
     )
     if (data.widgets.length > count.current && count.current > 0 && !focus)
-      setTimeout(() => rf.fitView({ duration: 400, maxZoom: 1, padding: 0.1 }), 60)
+      setTimeout(() => rf.fitView({ ...FIT, duration: 400 }), 60)
     count.current = data.widgets.length
   }, [data, ctx, focus, setNodes, rf])
 
@@ -180,9 +183,7 @@ function WorldCanvas({ spaceId, worldId }: { spaceId: Id; worldId: Id }) {
   return (
     <div className="screen">
       <header className="screen-head">
-        <Link to={`/s/${spaceId}`} className="back-link">
-          ← {data.space.title}
-        </Link>
+        <Crumbs space={data.space} />
         <span className="world-dot" data-colour={data.world.colour} aria-hidden />
         <div className="screen-title">
           <EditableTitle value={data.world.title} onSave={(title) => api.updateWorld(worldId, { title })} />
@@ -191,7 +192,7 @@ function WorldCanvas({ spaceId, worldId }: { spaceId: Id; worldId: Id }) {
         <AddWidgetMenu types={data.widget_types} onPick={addWidget} />
         {confirmDelete ? (
           <span className="inline-confirm">
-            <span className="small">Delete this world, its {data.widgets.length} widgets and their reasons?</span>
+            <span className="small">Delete this node, its {data.widgets.length} widgets and their reasons?</span>
             <button
               type="button"
               className="link-button small danger"
@@ -208,9 +209,10 @@ function WorldCanvas({ spaceId, worldId }: { spaceId: Id; worldId: Id }) {
           </span>
         ) : (
           <button type="button" className="button ghost small-button" onClick={() => setConfirmDelete(true)}>
-            Delete world
+            Delete node
           </button>
         )}
+        <DemoBadge />
       </header>
       <div className="screen-body">
         <div className="canvas-col">
@@ -222,7 +224,7 @@ function WorldCanvas({ spaceId, worldId }: { spaceId: Id; worldId: Id }) {
               onNodesChange={onNodesChange}
               onNodeDragStop={(_, n) => api.updateWidget(Number(n.id), { x: Math.round(n.position.x), y: Math.round(n.position.y) })}
               fitView
-              fitViewOptions={{ maxZoom: 1, padding: 0.1 }}
+              fitViewOptions={FIT}
               minZoom={0.2}
               maxZoom={1.5}
               nodesConnectable={false}
@@ -231,32 +233,32 @@ function WorldCanvas({ spaceId, worldId }: { spaceId: Id; worldId: Id }) {
               proOptions={{ hideAttribution: true }}
             >
               <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
-              <Controls showInteractive={false} position="bottom-left" />
+              <Controls showInteractive={false} position="bottom-right" />
             </ReactFlow>
             {data.widgets.length === 0 && (
               <div className="canvas-empty">
                 <p>No widgets yet.</p>
-                <p className="muted small">Add one with “+ Widget”, or ask the world agent.</p>
+                <p className="muted small">Add one with “+ Widget”, or ask the node agent.</p>
               </div>
             )}
           </div>
         </div>
-        <SidePanel
-          tabs={[
-            {
-              id: 'chat',
-              label: 'World chat',
-              body: (
-                <ChatPanel
-                  key={worldId}
-                  scope={{ kind: 'world', id: worldId }}
-                  intro="The world agent knows every widget in this world. It creates, edits and arranges them."
-                />
-              ),
-            },
-          ]}
-        />
       </div>
+      <FloatingWindow
+        storeKey="doctus.win.node-chat"
+        title="Node chat"
+        badge={<span className="demo-badge">Scripted</span>}
+        left={16}
+        width={380}
+        height={540}
+        className="chat-win"
+      >
+        <ChatPanel
+          key={worldId}
+          scope={{ kind: 'world', id: worldId }}
+          intro="The node agent knows every widget in this node. It creates, edits and arranges them."
+        />
+      </FloatingWindow>
     </div>
   )
 }
@@ -265,7 +267,7 @@ export function WorldScreen() {
   const { spaceId, worldId } = useParams()
   const s = Number(spaceId)
   const w = Number(worldId)
-  if (!Number.isInteger(s) || !Number.isInteger(w)) return <p className="page-pad error-banner">No such world.</p>
+  if (!Number.isInteger(s) || !Number.isInteger(w)) return <p className="page-pad error-banner">No such node.</p>
   return (
     <ReactFlowProvider key={w}>
       <WorldCanvas spaceId={s} worldId={w} />

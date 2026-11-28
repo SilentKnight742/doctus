@@ -70,6 +70,11 @@ describe('mock api', () => {
     expect(spaces).toHaveLength(2)
     expect(saves).toHaveLength(1)
     const created = await api.createSpace('Mine')
+    expect(saves).toHaveLength(2)
+    // A burst of writes notifies once, shortly after.
+    await api.updateSpace(created.id, { description: 'a' })
+    expect(saves).toHaveLength(3)
+    await new Promise((r) => setTimeout(r, 50))
     expect(notified).toBe(1)
     expect(await api.listSpaces()).toHaveLength(3)
     // results are copies, not live objects
